@@ -753,15 +753,15 @@ test.describe('Epic 3 land economy foundation', () => {
 
     await expect(page.locator('#factory-command-panel')).toBeVisible();
     await expect(page.getByText('Factory Orders')).toBeVisible();
-    await page.getByRole('button', { name: 'Build Worker - 80 metal' }).click();
+    await page.getByRole('button', { name: 'Build Worker - 60 metal' }).click();
 
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 200 | Cash: 100 | Crew: 6/6');
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 220 | Cash: 100 | Crew: 6/6');
     await expect(page.locator('#production-readout')).toContainText('Worker');
     let state = await getDebugState(page);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: true, kind: 'produce', product: 'worker' }));
-    expect(state.lastProductionEvent).toEqual(expect.objectContaining({ kind: 'queued', product: 'worker', stockpile: 200 }));
+    expect(state.lastProductionEvent).toEqual(expect.objectContaining({ kind: 'queued', product: 'worker', stockpile: 220 }));
     expect(state.entities.find((entity) => entity.id === 'player-factory')?.productionQueue?.[0]).toEqual(
-      expect.objectContaining({ product: 'worker', cost: 80 }),
+      expect.objectContaining({ product: 'worker', cost: 60 }),
     );
     expect(state.entities.find((entity) => entity.id === 'player-factory')?.renderPolish).toEqual(
       expect.objectContaining({ hasProductionActivity: true }),
@@ -780,16 +780,16 @@ test.describe('Epic 3 land economy foundation', () => {
     const barracks = await worldToScreen(page, PLAYER_BARRACKS.x, PLAYER_BARRACKS.y);
     await page.mouse.click(barracks.x, barracks.y);
 
-    await expect(page.getByRole('button', { name: 'Build Guard - 120 metal + 20 cash' })).toBeVisible();
-    await page.getByRole('button', { name: 'Build Guard - 120 metal + 20 cash' }).click();
+    await expect(page.getByRole('button', { name: 'Build Guard - 90 metal + 15 cash' })).toBeVisible();
+    await page.getByRole('button', { name: 'Build Guard - 90 metal + 15 cash' }).click();
 
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 160 | Cash: 80 | Crew: 6/6');
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 190 | Cash: 85 | Crew: 6/6');
     await expect(page.locator('#barracks-production-readout')).toContainText('Guard');
     let state = await getDebugState(page);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: true, kind: 'produce', product: 'guard' }));
-    expect(state.lastProductionEvent).toEqual(expect.objectContaining({ kind: 'queued', product: 'guard', stockpile: 160 }));
+    expect(state.lastProductionEvent).toEqual(expect.objectContaining({ kind: 'queued', product: 'guard', stockpile: 190 }));
     expect(state.entities.find((entity) => entity.id === 'player-barracks')?.productionQueue?.[0]).toEqual(
-      expect.objectContaining({ product: 'guard', cost: 120 }),
+      expect.objectContaining({ product: 'guard', cost: 90 }),
     );
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned', null, { timeout: 8000 });
@@ -804,9 +804,9 @@ test.describe('Epic 3 land economy foundation', () => {
     const factory = await worldToScreen(page, 767, 825);
     await page.mouse.click(factory.x, factory.y);
 
-    await page.getByRole('button', { name: 'Build Truck - 180 metal' }).click();
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 100 | Cash: 100 | Crew: 6/6');
-    await expect(page.getByRole('button', { name: 'Build Truck - 180 metal' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Build Truck - 130 metal' }).click();
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 150 | Cash: 100 | Crew: 6/6');
+    await expect(page.getByRole('button', { name: 'Build Truck - 130 metal' })).toBeDisabled();
 
     await page.evaluate(() => {
       const button = document.querySelector<HTMLButtonElement>('#produce-truck-button');
@@ -817,7 +817,7 @@ test.describe('Epic 3 land economy foundation', () => {
     });
 
     const state = await getDebugState(page);
-    expect(page.getByRole('button', { name: 'Build Truck - 180 metal' })).toBeDisabled();
+    expect(page.getByRole('button', { name: 'Build Truck - 130 metal' })).toBeDisabled();
     expect(state.resources.metal).toBe(100);
   });
 });
@@ -830,16 +830,16 @@ test.describe('Epic 4 worker building placement foundation', () => {
 
     await expect(page.locator('#worker-command-panel')).toBeVisible();
     await expect(page.getByText('Worker Build Menu')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Plan House - 120 metal' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Plan House - 90 metal' })).toBeEnabled();
     await expect(page.locator('#worker-build-details')).toContainText('Prerequisite: select a worker.');
     await expect(page.locator('#worker-build-details')).toContainText('Guard Tower: 150 metal | 7.5s build | 260 range | targets enemy raiders');
 
-    await page.getByRole('button', { name: 'Plan House - 120 metal' }).click();
+    await page.getByRole('button', { name: 'Plan House - 90 metal' }).click();
     const validPlacement = await worldToScreen(page, 950, 1050);
     await page.mouse.move(validPlacement.x, validPlacement.y);
 
     await expect(page.locator('#placement-readout')).toContainText('House foundation: valid');
-    await expect(page.locator('#placement-readout')).toContainText('120 metal | 4.5s build | +4 crew cap');
+    await expect(page.locator('#placement-readout')).toContainText('90 metal | 4.5s build | +8 crew cap');
     const state = await getDebugState(page);
     expect(state.placement).toEqual(
       expect.objectContaining({
@@ -857,7 +857,7 @@ test.describe('Epic 4 worker building placement foundation', () => {
     const worker = await worldToScreen(page, 760, 1000);
     await page.mouse.click(worker.x, worker.y);
 
-    await page.getByRole('button', { name: 'Plan House - 120 metal' }).click();
+    await page.getByRole('button', { name: 'Plan House - 90 metal' }).click();
     const blockedPlacement = await worldToScreen(page, 1100, 1000);
     await page.mouse.move(blockedPlacement.x, blockedPlacement.y);
 
@@ -885,7 +885,7 @@ test.describe('Epic 4 worker building placement foundation', () => {
     const worker = await worldToScreen(page, 760, 1000);
     await page.mouse.click(worker.x, worker.y);
 
-    await page.getByRole('button', { name: 'Plan House - 120 metal' }).click();
+    await page.getByRole('button', { name: 'Plan House - 90 metal' }).click();
     const validPlacement = await worldToScreen(page, 950, 1050);
     await page.mouse.move(validPlacement.x, validPlacement.y);
     await page.mouse.click(validPlacement.x, validPlacement.y);
@@ -923,24 +923,24 @@ test.describe('Epic 4 worker building placement foundation', () => {
     const worker = await worldToScreen(page, 760, 1000);
     await page.mouse.click(worker.x, worker.y);
 
-    await page.getByRole('button', { name: 'Plan House - 120 metal' }).click();
+    await page.getByRole('button', { name: 'Plan House - 90 metal' }).click();
     const validPlacement = await worldToScreen(page, 950, 1050);
     await page.mouse.move(validPlacement.x, validPlacement.y);
     await page.mouse.click(validPlacement.x, validPlacement.y);
 
-    await page.waitForFunction(() => window.__wambasaRts?.crew.capacity === 10, null, { timeout: 8000 });
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 160 | Cash: 100 | Crew: 6/10');
-    await expect(page.getByText('Crew House complete. Crew capacity increased to 10.')).toBeVisible();
+    await page.waitForFunction(() => window.__wambasaRts?.crew.capacity === 14, null, { timeout: 8000 });
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 190 | Cash: 100 | Crew: 6/14');
+    await expect(page.getByText('Crew House complete. Crew capacity increased to 14.')).toBeVisible();
 
     const state = await getDebugState(page);
-    expect(state.crew).toEqual({ used: 4, reserved: 0, capacity: 10 });
+    expect(state.crew).toEqual({ used: 4, reserved: 0, capacity: 14 });
     expect(state.entities).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: 'house',
           name: 'Crew House',
           commandable: true,
-          construction: expect.objectContaining({ complete: true, capacityBonus: 4 }),
+          construction: expect.objectContaining({ complete: true, capacityBonus: 8 }),
         }),
         expect.objectContaining({ id: 'worker-1', movementState: 'idle', buildJob: undefined }),
       ]),
@@ -952,8 +952,8 @@ test.describe('Epic 4 worker building placement foundation', () => {
     const worker = await worldToScreen(page, 850, 695);
     await page.mouse.click(worker.x, worker.y);
 
-    await expect(page.getByRole('button', { name: 'Plan Dock - 160 metal' })).toBeEnabled();
-    await page.getByRole('button', { name: 'Plan Dock - 160 metal' }).click();
+    await expect(page.getByRole('button', { name: 'Plan Dock - 120 metal' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Plan Dock - 120 metal' }).click();
 
     const validShore = await worldToScreen(page, 900, 500);
     await page.mouse.move(validShore.x, validShore.y);
@@ -989,13 +989,13 @@ test.describe('Epic 4 worker building placement foundation', () => {
     const worker = await worldToScreen(page, 760, 1000);
     await page.mouse.click(worker.x, worker.y);
 
-    await page.getByRole('button', { name: 'Plan House - 120 metal' }).click();
+    await page.getByRole('button', { name: 'Plan House - 90 metal' }).click();
     await expect(page.locator('#placement-readout')).toContainText('Right-click or Esc to cancel');
     await page.keyboard.press('Escape');
     await expect(page.locator('#placement-readout')).toHaveText('No placement active');
     await expect(page.getByText('Building placement cancelled.')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Plan Dock - 160 metal' }).click();
+    await page.getByRole('button', { name: 'Plan Dock - 120 metal' }).click();
     await expect(page.locator('#placement-readout')).toContainText('Right-click or Esc to cancel');
     const placementPoint = await worldToScreen(page, 900, 500);
     await page.mouse.click(placementPoint.x, placementPoint.y, { button: 'right' });
@@ -1008,7 +1008,7 @@ test.describe('Epic 4 worker building placement foundation', () => {
     const worker = await worldToScreen(page, 850, 695);
     await page.mouse.click(worker.x, worker.y);
 
-    await page.getByRole('button', { name: 'Plan Dock - 160 metal' }).click();
+    await page.getByRole('button', { name: 'Plan Dock - 120 metal' }).click();
     const validShore = await worldToScreen(page, 900, 500);
     await page.mouse.move(validShore.x, validShore.y);
     await page.mouse.click(validShore.x, validShore.y);
@@ -1153,15 +1153,15 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await expect(page.locator('#dock-command-panel')).toBeVisible();
     await expect(page.getByText('Dock Orders')).toBeVisible();
     await expect(page.locator('#selection-readout')).toContainText('Boat production');
-    await page.getByRole('button', { name: 'Build Fishing Boat - 140 metal + 40 cash' }).click();
+    await page.getByRole('button', { name: 'Build Fishing Boat - 100 metal + 25 cash' }).click();
 
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 140 | Cash: 60 | Crew: 6/6');
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 180 | Cash: 75 | Crew: 6/6');
     await expect(page.locator('#dock-production-readout')).toContainText('Fishing Boat');
     const state = await getDebugState(page);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: true, kind: 'produce', product: 'boat' }));
-    expect(state.lastProductionEvent).toEqual(expect.objectContaining({ kind: 'queued', product: 'boat', stockpile: 140 }));
+    expect(state.lastProductionEvent).toEqual(expect.objectContaining({ kind: 'queued', product: 'boat', stockpile: 180 }));
     expect(state.entities.find((entity) => entity.id === 'player-dock')?.productionQueue?.[0]).toEqual(
-      expect.objectContaining({ product: 'boat', cost: 140 }),
+      expect.objectContaining({ product: 'boat', cost: 100 }),
     );
   });
 
@@ -1169,7 +1169,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.goto('/');
     const dock = await worldToScreen(page, 1370, 468);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Fishing Boat - 140 metal + 40 cash' }).click();
+    await page.getByRole('button', { name: 'Build Fishing Boat - 100 metal + 25 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'boat', null, { timeout: 10000 });
     await expect(page.getByText('Fishing Boat produced.')).toBeVisible();
@@ -1291,7 +1291,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.goto('/');
     const dock = await worldToScreen(page, PLAYER_DOCK.x, PLAYER_DOCK.y);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Fishing Boat - 140 metal + 40 cash' }).click();
+    await page.getByRole('button', { name: 'Build Fishing Boat - 100 metal + 25 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'boat', null, { timeout: 10000 });
     let state = await getDebugState(page);
@@ -1321,7 +1321,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.goto('/');
     const dock = await worldToScreen(page, PLAYER_DOCK.x, PLAYER_DOCK.y);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Attack Boat - 180 metal + 80 cash' }).click();
+    await page.getByRole('button', { name: 'Build Attack Boat - 135 metal + 50 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'attackBoat', null, { timeout: 11000 });
     await expect(page.getByText('Attack Boat produced.')).toBeVisible();
@@ -1359,7 +1359,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.goto('/');
     const dock = await worldToScreen(page, PLAYER_DOCK.x, PLAYER_DOCK.y);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Attack Boat - 180 metal + 80 cash' }).click();
+    await page.getByRole('button', { name: 'Build Attack Boat - 135 metal + 50 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'attackBoat', null, { timeout: 11000 });
     let state = await getDebugState(page);
@@ -1403,7 +1403,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.goto('/');
     const dock = await worldToScreen(page, PLAYER_DOCK.x, PLAYER_DOCK.y);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Attack Boat - 180 metal + 80 cash' }).click();
+    await page.getByRole('button', { name: 'Build Attack Boat - 135 metal + 50 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'attackBoat', null, { timeout: 11000 });
     let state = await getDebugState(page);
@@ -1430,7 +1430,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.goto('/');
     const dock = await worldToScreen(page, 1370, 468);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Fishing Boat - 140 metal + 40 cash' }).click();
+    await page.getByRole('button', { name: 'Build Fishing Boat - 100 metal + 25 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'boat', null, { timeout: 10000 });
     const state = await getDebugState(page);
@@ -1451,7 +1451,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.goto('/');
     const dock = await worldToScreen(page, 1370, 468);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Fishing Boat - 140 metal + 40 cash' }).click();
+    await page.getByRole('button', { name: 'Build Fishing Boat - 100 metal + 25 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'boat', null, { timeout: 10000 });
     let state = await getDebugState(page);
@@ -1518,7 +1518,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.goto('/');
     const dock = await worldToScreen(page, 1370, 468);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Fishing Boat - 140 metal + 40 cash' }).click();
+    await page.getByRole('button', { name: 'Build Fishing Boat - 100 metal + 25 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'boat', null, { timeout: 10000 });
     let state = await getDebugState(page);
@@ -1550,14 +1550,14 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
       }),
     );
 
-    await page.waitForFunction(() => window.__wambasaRts?.resources.cash === 220, null, { timeout: 7000 });
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 140 | Cash: 220 | Crew: 6/6');
-    await expect(page.getByText('Fishing Boat sold 80 fish from Sunlit Cod Bank and is returning to fish. Cash: 220.')).toBeVisible();
+    await page.waitForFunction(() => window.__wambasaRts?.resources.cash === 235, null, { timeout: 7000 });
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 180 | Cash: 235 | Crew: 6/6');
+    await expect(page.getByText('Fishing Boat sold 80 fish from Sunlit Cod Bank and is returning to fish. Cash: 235.')).toBeVisible();
     await expect(page.locator('#match-result-panel')).toBeHidden();
 
     state = await getDebugState(page);
     expect(state.match).toEqual(expect.objectContaining({ outcome: 'running', playerProfitTarget: 1600 }));
-    expect(state.lastResourceEvent).toEqual(expect.objectContaining({ entityId: boat?.id, kind: 'fishSold', amount: 80, cash: 220 }));
+    expect(state.lastResourceEvent).toEqual(expect.objectContaining({ entityId: boat?.id, kind: 'fishSold', amount: 80, cash: 235 }));
     expect(state.stats).toEqual(expect.objectContaining({ cashEarned: 160, fishSold: 80, metalHarvested: 0 }));
     expect(state.entities.find((entity) => entity.id === boat?.id)).toEqual(
       expect.objectContaining({
@@ -1575,7 +1575,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.goto('/');
     const dock = await worldToScreen(page, 1370, 468);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Fishing Boat - 140 metal + 40 cash' }).click();
+    await page.getByRole('button', { name: 'Build Fishing Boat - 100 metal + 25 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'boat', null, { timeout: 10000 });
     let state = await getDebugState(page);
@@ -1607,12 +1607,12 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
 
     const dockScreen = await worldToScreen(page, 1370, 468);
     await page.mouse.click(dockScreen.x, dockScreen.y, { button: 'right' });
-    await page.waitForFunction(() => window.__wambasaRts?.resources.cash === 300, null, { timeout: 10000 });
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 140 | Cash: 300 | Crew: 6/6');
-    await expect(page.getByText('Fishing Boat sold 80 fish from Breaker Herring Run and is returning to fish. Cash: 300.')).toBeVisible();
+    await page.waitForFunction(() => window.__wambasaRts?.resources.cash === 315, null, { timeout: 10000 });
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 180 | Cash: 315 | Crew: 6/6');
+    await expect(page.getByText('Fishing Boat sold 80 fish from Breaker Herring Run and is returning to fish. Cash: 315.')).toBeVisible();
 
     state = await getDebugState(page);
-    expect(state.lastResourceEvent).toEqual(expect.objectContaining({ entityId: boat?.id, kind: 'fishSold', amount: 80, cash: 300 }));
+    expect(state.lastResourceEvent).toEqual(expect.objectContaining({ entityId: boat?.id, kind: 'fishSold', amount: 80, cash: 315 }));
     expect(state.entities.find((entity) => entity.id === boat?.id)).toEqual(
       expect.objectContaining({
         fishing: expect.objectContaining({ zoneId: 'herring-bank', phase: 'to-zone' }),
@@ -1625,7 +1625,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.goto('/');
     const dock = await worldToScreen(page, PLAYER_DOCK.x, PLAYER_DOCK.y);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Fishing Boat - 140 metal + 40 cash' }).click();
+    await page.getByRole('button', { name: 'Build Fishing Boat - 100 metal + 25 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'boat', null, { timeout: 10000 });
     await page.waitForFunction(() => Boolean(window.__wambasaRtsSetFishingZoneAmount), null, { timeout: 5000 });
@@ -1687,7 +1687,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
 
     const worker = await worldToScreen(page, 850, 695);
     await page.mouse.click(worker.x, worker.y);
-    await page.getByRole('button', { name: 'Plan Dock - 160 metal' }).click();
+    await page.getByRole('button', { name: 'Plan Dock - 120 metal' }).click();
     const dockPlacement = await worldToScreen(page, 900, 500);
     await page.mouse.move(dockPlacement.x, dockPlacement.y);
     await page.mouse.click(dockPlacement.x, dockPlacement.y);
@@ -1714,7 +1714,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
 
     const builtDockScreen = await worldToScreen(page, builtDock?.x ?? 900, builtDock?.y ?? 500);
     await page.mouse.click(builtDockScreen.x, builtDockScreen.y);
-    await page.getByRole('button', { name: 'Build Fishing Boat - 140 metal + 40 cash' }).click();
+    await page.getByRole('button', { name: 'Build Fishing Boat - 100 metal + 25 cash' }).click();
     await expect(page.locator('#dock-production-readout')).toContainText('Fishing Boat');
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'boat', null, { timeout: 10000 });
@@ -1739,12 +1739,12 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await page.mouse.click(unloadDockScreen.x, unloadDockScreen.y, { button: 'right' });
     await expect(page.getByText('Fish unload command queued for 1 boat.')).toBeVisible();
 
-    await page.waitForFunction(() => window.__wambasaRts?.resources.cash === 220, null, { timeout: 8000 });
+    await page.waitForFunction(() => window.__wambasaRts?.resources.cash === 235, null, { timeout: 8000 });
     state = await getDebugState(page);
-    expect(state.resources.cash).toBe(220);
+    expect(state.resources.cash).toBe(235);
     expect(state.resources.metal).toBeGreaterThanOrEqual(80);
-    expect(state.lastResourceEvent).toEqual(expect.objectContaining({ kind: 'fishSold', amount: 80, cash: 220 }));
-    await expect(page.locator('#economy-readout')).toContainText('Cash: 220');
+    expect(state.lastResourceEvent).toEqual(expect.objectContaining({ kind: 'fishSold', amount: 80, cash: 235 }));
+    await expect(page.locator('#economy-readout')).toContainText('Cash: 235');
   });
 });
 
@@ -1889,7 +1889,7 @@ test.describe('Epic 6 AI rival foundation', () => {
     let state = await getDebugState(page);
     expect(state.entities.find((entity) => entity.id === 'enemy-factory')?.productionQueue).toEqual(
       expect.arrayContaining([
-      expect.objectContaining({ product: 'worker', cost: 80 }),
+      expect.objectContaining({ product: 'worker', cost: 60 }),
       ]),
     );
 
@@ -2057,9 +2057,9 @@ test.describe('Epic 6 AI rival foundation', () => {
     await page.goto('/');
     const barracks = await worldToScreen(page, PLAYER_BARRACKS.x, PLAYER_BARRACKS.y);
     await page.mouse.click(barracks.x, barracks.y);
-    await page.getByRole('button', { name: 'Build Guard - 120 metal + 20 cash' }).click();
-    await page.getByRole('button', { name: 'Build Saboteur - 150 metal + 40 cash' }).click();
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 10 | Cash: 40 | Crew: 6/6');
+    await page.getByRole('button', { name: 'Build Guard - 90 metal + 15 cash' }).click();
+    await page.getByRole('button', { name: 'Build Saboteur - 110 metal + 25 cash' }).click();
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 80 | Cash: 60 | Crew: 6/6');
 
     await page.waitForFunction(() => Boolean(window.__wambasaRtsDamageEntity), null, { timeout: 5000 });
     await page.evaluate(() => {
@@ -2299,7 +2299,7 @@ test.describe('Epic 7 combat foundation', () => {
 
     const dock = await worldToScreen(page, PLAYER_DOCK.x, PLAYER_DOCK.y);
     await page.mouse.click(dock.x, dock.y);
-    await page.getByRole('button', { name: 'Build Attack Boat - 180 metal + 80 cash' }).click();
+    await page.getByRole('button', { name: 'Build Attack Boat - 135 metal + 50 cash' }).click();
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'attackBoat', null, { timeout: 11000 });
     let state = await getDebugState(page);
@@ -2518,14 +2518,14 @@ test.describe('Epic 7 combat foundation', () => {
     const barracks = await worldToScreen(page, PLAYER_BARRACKS.x, PLAYER_BARRACKS.y);
     await page.mouse.click(barracks.x, barracks.y);
 
-    await expect(page.getByRole('button', { name: 'Build Saboteur - 150 metal + 40 cash' })).toBeVisible();
-    await page.getByRole('button', { name: 'Build Saboteur - 150 metal + 40 cash' }).click();
+    await expect(page.getByRole('button', { name: 'Build Saboteur - 110 metal + 25 cash' })).toBeVisible();
+    await page.getByRole('button', { name: 'Build Saboteur - 110 metal + 25 cash' }).click();
 
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 130 | Cash: 60 | Crew: 6/6');
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 170 | Cash: 75 | Crew: 6/6');
     await expect(page.locator('#barracks-production-readout')).toContainText('Saboteur');
     let state = await getDebugState(page);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: true, kind: 'produce', product: 'saboteur' }));
-    expect(state.lastProductionEvent).toEqual(expect.objectContaining({ kind: 'queued', product: 'saboteur', stockpile: 130 }));
+    expect(state.lastProductionEvent).toEqual(expect.objectContaining({ kind: 'queued', product: 'saboteur', stockpile: 170 }));
 
     await page.waitForFunction(() => window.__wambasaRts?.lastProductionEvent?.kind === 'spawned' && window.__wambasaRts.lastProductionEvent.product === 'saboteur', null, {
       timeout: 5000,

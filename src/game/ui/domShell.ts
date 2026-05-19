@@ -142,8 +142,8 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
           <div class="rts-command-grid" aria-label="Context actions">
             <div id="factory-command-panel" class="rts-factory-commands" hidden>
               <div class="rts-command-group-title">Factory Orders</div>
-              <button id="produce-worker-button" data-command-icon="WK" data-command-tone="econ" type="button" aria-label="Build Worker - 80 metal">Build Worker<br><span>80 metal</span></button>
-              <button id="produce-truck-button" data-command-icon="TR" data-command-tone="econ" type="button" aria-label="Build Truck - 180 metal">Build Truck<br><span>180 metal</span></button>
+              <button id="produce-worker-button" data-command-icon="WK" data-command-tone="econ" type="button" aria-label="Build Worker - 60 metal">Build Worker<br><span>60 metal</span></button>
+              <button id="produce-truck-button" data-command-icon="TR" data-command-tone="econ" type="button" aria-label="Build Truck - 130 metal">Build Truck<br><span>130 metal</span></button>
               <button id="sell-reels-button" data-command-icon="$$" data-command-tone="cash" type="button" aria-label="Sell stored reels">Sell Reels<br><span>Cash from inventory</span></button>
               <button id="toggle-autosell-button" data-command-icon="AU" data-command-tone="cash" type="button" aria-label="Toggle reel autosell">Auto Sell<br><span>Off</span></button>
               <div class="rts-inline-adjuster" aria-label="Factory crew release controls">
@@ -157,14 +157,14 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
             </div>
             <div id="barracks-command-panel" class="rts-factory-commands" hidden>
               <div class="rts-command-group-title">Barracks Orders</div>
-              <button id="produce-guard-button" data-command-icon="GD" data-command-tone="combat" type="button" aria-label="Build Guard - 120 metal + 20 cash">Build Guard<br><span>120 metal + 20 cash</span></button>
-              <button id="produce-saboteur-button" data-command-icon="SB" data-command-tone="combat" type="button" aria-label="Build Saboteur - 150 metal + 40 cash">Build Saboteur<br><span>150 metal + 40 cash</span></button>
+              <button id="produce-guard-button" data-command-icon="GD" data-command-tone="combat" type="button" aria-label="Build Guard - 90 metal + 15 cash">Build Guard<br><span>90 metal + 15 cash</span></button>
+              <button id="produce-saboteur-button" data-command-icon="SB" data-command-tone="combat" type="button" aria-label="Build Saboteur - 110 metal + 25 cash">Build Saboteur<br><span>110 metal + 25 cash</span></button>
               <div id="barracks-production-readout" class="rts-production-readout">Queue empty</div>
             </div>
             <div id="dock-command-panel" class="rts-dock-commands" hidden>
               <div class="rts-command-group-title">Dock Orders</div>
-              <button id="produce-boat-button" data-command-icon="FB" data-command-tone="econ" type="button" aria-label="Build Fishing Boat - 140 metal + 40 cash">Build Fishing Boat<br><span>140 metal + 40 cash</span></button>
-              <button id="produce-attack-boat-button" data-command-icon="AB" data-command-tone="combat" type="button" aria-label="Build Attack Boat - 180 metal + 80 cash">Build Attack Boat<br><span>180 metal + 80 cash</span></button>
+              <button id="produce-boat-button" data-command-icon="FB" data-command-tone="econ" type="button" aria-label="Build Fishing Boat - 100 metal + 25 cash">Build Fishing Boat<br><span>100 metal + 25 cash</span></button>
+              <button id="produce-attack-boat-button" data-command-icon="AB" data-command-tone="combat" type="button" aria-label="Build Attack Boat - 135 metal + 50 cash">Build Attack Boat<br><span>135 metal + 50 cash</span></button>
               <div id="dock-production-readout" class="rts-production-readout">Queue empty</div>
             </div>
             <div id="tech-lab-command-panel" class="rts-dock-commands" hidden>
@@ -177,12 +177,12 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
             </div>
             <div id="worker-command-panel" class="rts-worker-commands" hidden>
               <div class="rts-command-group-title">Worker Build Menu</div>
-              <button id="place-house-button" data-command-icon="HS" data-command-tone="build" type="button" aria-label="Build House - 120 metal, +4 crew capacity">Build House<br><span>+4 crew cap</span></button>
-              <button id="place-dock-button" data-command-icon="DK" data-command-tone="build" type="button" aria-label="Plan Dock - 160 metal">Plan Dock<br><span>160 metal</span></button>
-              <button id="place-guard-tower-button" data-command-icon="GT" data-command-tone="combat" type="button" aria-label="Plan Guard Tower - 220 metal">Plan Guard Tower<br><span>220 metal</span></button>
-              <button id="place-tech-lab-button" data-command-icon="TL" data-command-tone="utility" type="button" aria-label="Plan Tech Lab - 260 metal">Plan Tech Lab<br><span>260 metal</span></button>
-              <button id="place-barracks-button" data-command-icon="BR" data-command-tone="combat" type="button" aria-label="Plan Barracks - 240 metal">Plan Barracks<br><span>240 metal</span></button>
-              <button id="place-factory-button" data-command-icon="CC" data-command-tone="econ" type="button" aria-label="Plan Command Center - 420 metal">Plan Command Center<br><span>420 metal</span></button>
+              <button id="place-house-button" data-command-icon="HS" data-command-tone="build" type="button" aria-label="Plan House - 90 metal, +8 crew capacity">Build House<br><span>+8 crew cap</span></button>
+              <button id="place-dock-button" data-command-icon="DK" data-command-tone="build" type="button" aria-label="Plan Dock - 120 metal">Plan Dock<br><span>120 metal</span></button>
+              <button id="place-guard-tower-button" data-command-icon="GT" data-command-tone="combat" type="button" aria-label="Plan Guard Tower - 150 metal">Plan Guard Tower<br><span>150 metal</span></button>
+              <button id="place-tech-lab-button" data-command-icon="TL" data-command-tone="utility" type="button" aria-label="Plan Tech Lab - 190 metal">Plan Tech Lab<br><span>190 metal</span></button>
+              <button id="place-barracks-button" data-command-icon="BR" data-command-tone="combat" type="button" aria-label="Plan Barracks - 180 metal">Plan Barracks<br><span>180 metal</span></button>
+              <button id="place-factory-button" data-command-icon="CC" data-command-tone="econ" type="button" aria-label="Plan Command Center - 320 metal">Plan Command Center<br><span>320 metal</span></button>
               <button id="assign-factory-crew-button" data-command-icon="CR" data-command-tone="utility" type="button" aria-label="Assign selected workers to factory crew">Crew Factory<br><span>Right-click factory</span></button>
               <button id="equip-reel-button" data-command-icon="RE" data-command-tone="cash" type="button" aria-label="Equip reel on selected workers">Equip Reel<br><span>Boost shoreline fishing</span></button>
               <div id="worker-build-details" class="rts-build-details" aria-label="Worker building details"></div>

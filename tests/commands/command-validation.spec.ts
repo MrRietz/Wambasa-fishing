@@ -555,7 +555,7 @@ const tests: TestCase[] = [
       assert.equal(output.result.ok, false);
       assert.equal(output.result.kind, 'produce');
       assert.equal(output.result.reason, 'unaffordable');
-      assert.equal(output.result.message, 'Need 40 cash to build Fishing Boat.');
+      assert.equal(output.result.message, 'Need 25 cash to build Fishing Boat.');
       assert.equal(stockpile.metal, 500);
       assert.equal(stockpile.cash, 0);
       assert.deepEqual(factory.economy?.productionQueue, []);
@@ -678,7 +678,7 @@ const tests: TestCase[] = [
       assert.equal(builder.movement.state, 'moving');
       assert.equal(genericPathCalls, 0);
       assert.equal(entityPathCalls, 1);
-      assert.equal(stockpile.metal, 340);
+      assert.equal(stockpile.metal, 380);
     },
   },
   {
@@ -710,7 +710,7 @@ const tests: TestCase[] = [
       assert.equal(output.moveCommand?.y, 150);
       assert.deepEqual(attemptedGoals, [{ x: 110, y: 100 }, { x: 70, y: 100 }, { x: 100, y: 150 }]);
       assert.deepEqual(builder.moveTarget, { x: 100, y: 150 });
-      assert.equal(stockpile.metal, 380);
+      assert.equal(stockpile.metal, 410);
     },
   },
   {

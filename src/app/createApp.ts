@@ -2361,7 +2361,7 @@ function updateConstruction(deltaSeconds: number, layers: RenderLayers): boolean
           : `${construction.siteName} complete. Defensive position ready.`,
     );
     if (worker?.kind === 'worker' && worker.faction === 'player' && !worker.economy?.buildJob) {
-      queueWorkerToNearbyConstruction(worker, construction.siteId);
+      queueWorkerToNextConstruction(worker, construction.siteId);
     }
   }
 
@@ -2378,25 +2378,54 @@ function updateConstruction(deltaSeconds: number, layers: RenderLayers): boolean
   return result.changed;
 }
 
-function queueWorkerToNearbyConstruction(worker: GameEntity, completedSiteId?: string): boolean {
+function queueWorkerToNextConstruction(worker: GameEntity, completedSiteId?: string): boolean {
   if (worker.kind !== 'worker' || worker.faction !== 'player' || getDamageState(worker) === 'destroyed' || worker.economy?.buildJob) {
     return false;
   }
 
-  const site = entities
+  const queuedSiteIds = worker.economy?.buildQueue ?? [];
+  for (let index = 0; index < queuedSiteIds.length; index += 1) {
+    const siteId = queuedSiteIds[index];
+    if (siteId === completedSiteId) {
+      continue;
+    }
+    const site = entities.find(
+      (entity) =>
+        entity.id === siteId &&
+        entity.faction === 'player' &&
+        entity.economy?.construction &&
+        !entity.economy.construction.complete,
+    );
+    if (!site) {
+      continue;
+    }
+    const remainingQueue = queuedSiteIds.slice(index + 1);
+    if (assignWorkerToConstruction(worker, site, remainingQueue)) {
+      return true;
+    }
+  }
+
+  const fallbackSites = entities
     .filter(
       (entity) =>
         entity.id !== completedSiteId &&
         entity.faction === 'player' &&
         entity.economy?.construction &&
-        !entity.economy.construction.complete &&
-        Math.hypot(entity.x - worker.x, entity.y - worker.y) <= 520,
+        !entity.economy.construction.complete,
     )
-    .sort((a, b) => Math.hypot(a.x - worker.x, a.y - worker.y) - Math.hypot(b.x - worker.x, b.y - worker.y))[0];
-  if (!site) {
-    return false;
+    .sort((a, b) => Math.hypot(a.x - worker.x, a.y - worker.y) - Math.hypot(b.x - worker.x, b.y - worker.y));
+
+  for (const site of fallbackSites) {
+    if (assignWorkerToConstruction(worker, site, [])) {
+      return true;
+    }
   }
 
+  worker.economy = { ...worker.economy, buildQueue: [] };
+  return false;
+}
+
+function assignWorkerToConstruction(worker: GameEntity, site: GameEntity, remainingQueue: string[]): boolean {
   const assignment = findReachableConstructionRoute(worker, site);
   if (!assignment) {
     return false;
@@ -2412,6 +2441,7 @@ function queueWorkerToNearbyConstruction(worker: GameEntity, completedSiteId?: s
     factoryDuty: undefined,
     repair: undefined,
     buildJob: { siteId: site.id, phase: 'to-site' },
+    buildQueue: remainingQueue,
   };
   lastMoveCommand = {
     x: assignment.workPoint.x,
@@ -3752,7 +3782,13 @@ function cancelBlockedMobileOrder(entity: GameEntity): void {
     return;
   }
 
-  entity.economy = { ...entity.economy, buildJob: undefined, buildQueue: undefined };
+  const failedSiteId = buildJob.siteId;
+  const remainingQueue = (entity.economy?.buildQueue ?? []).filter((siteId) => siteId !== failedSiteId);
+  entity.economy = { ...entity.economy, buildJob: undefined, buildQueue: remainingQueue };
+  if (queueWorkerToNextConstruction(entity, failedSiteId)) {
+    return;
+  }
+
   if (entity.faction === 'player') {
     setBootStatus('ready', `${entity.name} could not reach the construction site. Reissue the build order from a clear approach.`);
   } else {
@@ -4067,11 +4103,11 @@ function completeArrival(entity: GameEntity, layers: RenderLayers, deltaSeconds 
     const construction = site?.economy?.construction;
     if (!site || !construction || construction.complete) {
       const previousSiteId = buildJob.siteId;
-      entity.economy = { ...entity.economy, buildJob: undefined, buildQueue: undefined };
+      entity.economy = { ...entity.economy, buildJob: undefined };
       entity.path = [];
       entity.moveTarget = undefined;
       entity.movement.state = 'idle';
-      queueWorkerToNearbyConstruction(entity, previousSiteId);
+      queueWorkerToNextConstruction(entity, previousSiteId);
       return;
     }
     entity.movement.state = 'building';
