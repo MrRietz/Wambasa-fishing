@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wambasa Fishing Wars - UX Design Direction A</title>
+    <style>
+      :root {
+        --bg-deep: #091115;
+        --bg-panel: #142125;
+        --bg-panel-2: #1b2d31;
+        --line-soft: rgba(255, 217, 130, 0.22);
+        --line-strong: rgba(255, 217, 130, 0.54);
+        --gold: #ffd982;
+        --gold-dim: #d9a33d;
+        --text-main: #f3ecd6;
+        --text-dim: #bfcbbf;
+        --player: #72c9ff;
+        --enemy: #ff8368;
+        --success: #b9e382;
+        --warning: #ffc45b;
+        --shadow: 0 18px 40px rgba(0, 0, 0, 0.34);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text-main);
+        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+        background:
+          radial-gradient(circle at 18% 10%, rgba(255, 217, 130, 0.12), transparent 24%),
+          linear-gradient(135deg, #091115 0%, #112127 42%, #061015 100%);
+      }
+
+      .page {
+        display: grid;
+        gap: 20px;
+        max-width: 1500px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .intro {
+        padding: 20px 22px;
+        border: 1px solid var(--line-soft);
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(20, 33, 37, 0.96), rgba(9, 17, 21, 0.92));
+        box-shadow: var(--shadow);
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--gold);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-family: Georgia, serif;
+        font-size: 38px;
+        line-height: 1;
+      }
+
+      .intro p {
+        margin: 0;
+        max-width: 980px;
+        color: var(--text-dim);
+        line-height: 1.55;
+      }
+
+      .board {
+        position: relative;
+        min-height: 860px;
+        overflow: hidden;
+        border: 1px solid var(--line-soft);
+        border-radius: 22px;
+        background:
+          radial-gradient(circle at 20% 0%, rgba(114, 201, 255, 0.06), transparent 18%),
+          linear-gradient(180deg, rgba(8, 18, 21, 0.12), rgba(8, 18, 21, 0.54)),
+          url("terrainRenderer.ts") no-repeat;
+        box-shadow: var(--shadow);
+      }
+
+      .battlefield {
+        position: absolute;
+        inset: 0 384px 0 0;
+        background:
+          linear-gradient(180deg, rgba(10, 17, 20, 0.08), rgba(10, 17, 20, 0.26)),
+          radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.08), transparent 18%),
+          linear-gradient(180deg, #214e5f 0 23%, #9a7b4d 23% 28%, #394b3a 28% 100%);
+      }
+
+      .shoreline {
+        position: absolute;
+        left: 0;
+        right: 384px;
+        top: 185px;
+        height: 34px;
+        background: linear-gradient(180deg, rgba(255, 240, 198, 0.78), rgba(122, 167, 162, 0.2));
+        opacity: 0.72;
+      }
+
+      .road {
+        position: absolute;
+        border-radius: 18px;
+        background: rgba(123, 110, 80, 0.45);
+        box-shadow: inset 0 0 0 2px rgba(246, 223, 168, 0.09);
+      }
+
+      .road.one { left: 120px; top: 280px; width: 470px; height: 48px; }
+      .road.two { left: 420px; top: 248px; width: 48px; height: 270px; }
+      .road.three { left: 590px; top: 306px; width: 400px; height: 36px; }
+
+      .viewport-hud {
+        position: absolute;
+        left: 18px;
+        top: 18px;
+        display: grid;
+        gap: 8px;
+        width: 420px;
+      }
+
+      .viewport-pill {
+        padding: 10px 12px;
+        border: 1px solid rgba(255, 217, 130, 0.28);
+        border-radius: 10px;
+        background: rgba(9, 17, 21, 0.72);
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+      }
+
+      .viewport-pill.mode {
+        width: fit-content;
+        color: var(--gold);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .viewport-pill.selection {
+        font-weight: 800;
+      }
+
+      .viewport-pill.hotkeys {
+        color: var(--text-dim);
+        font-size: 12px;
+      }
+
+      .unit {
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(8, 18, 21, 0.65);
+        border-radius: 50%;
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.06);
+      }
+
+      .unit.player { background: var(--player); }
+      .unit.enemy { background: var(--enemy); }
+      .unit.worker::after,
+      .unit.guard::after,
+      .unit.truck::after,
+      .unit.boat::after {
+        position: absolute;
+        left: 50%;
+        top: -10px;
+        transform: translateX(-50%);
+        color: var(--text-main);
+        font-size: 9px;
+        font-weight: 900;
+      }
+      .unit.worker::after { content: "WK"; }
+      .unit.guard::after { content: "GD"; }
+      .unit.truck::after { content: "TR"; }
+      .unit.boat::after { content: "BT"; }
+
+      .right-rail {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 384px;
+        display: grid;
+        grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+        gap: 10px;
+        padding: 12px;
+        background: linear-gradient(180deg, rgba(16, 27, 31, 0.98), rgba(10, 18, 22, 0.96));
+        border-left: 1px solid var(--line-soft);
+      }
+
+      .panel {
+        border: 1px solid var(--line-soft);
+        border-radius: 14px;
+        background: linear-gradient(180deg, rgba(24, 38, 43, 0.92), rgba(10, 18, 22, 0.88));
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: center;
+        padding: 12px;
+      }
+
+      .topbar h2 {
+        margin: 0;
+        font-family: Georgia, serif;
+        font-size: 24px;
+        line-height: 1;
+      }
+
+      .sub {
+        margin-top: 4px;
+        color: var(--text-dim);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .buttons {
+        display: flex;
+        gap: 8px;
+      }
+
+      .pill-btn {
+        padding: 10px 14px;
+        border: 1px solid rgba(255, 217, 130, 0.32);
+        border-radius: 10px;
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .pill-btn.primary {
+        color: #1e1708;
+        background: linear-gradient(180deg, var(--gold), var(--gold-dim));
+      }
+
+      .pill-btn.secondary {
+        color: var(--text-main);
+        background: linear-gradient(180deg, #41574d, #23362f);
+      }
+
+      .radar {
+        display: grid;
+        grid-template-columns: 1fr 118px;
+        gap: 10px;
+        padding: 12px;
+      }
+
+      .radar-screen {
+        position: relative;
+        min-height: 176px;
+        overflow: hidden;
+        border: 2px solid rgba(255, 217, 130, 0.4);
+        border-radius: 12px;
+        background:
+          radial-gradient(circle at 50% 50%, rgba(114, 201, 255, 0.12), transparent 32%),
+          linear-gradient(180deg, #102125, #0a1418);
+      }
+
+      .radar-grid {
+        position: absolute;
+        inset: 0;
+        background:
+          repeating-linear-gradient(0deg, rgba(114, 201, 255, 0.08) 0 1px, transparent 1px 22px),
+          repeating-linear-gradient(90deg, rgba(114, 201, 255, 0.08) 0 1px, transparent 1px 22px);
+      }
+
+      .radar-dot {
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+
+      .radar-dot.player { background: var(--player); }
+      .radar-dot.enemy { background: var(--enemy); }
+      .radar-dot.resource { background: var(--gold); }
+
+      .economy {
+        display: grid;
+        gap: 8px;
+      }
+
+      .econ-block {
+        padding: 10px;
+        border: 1px solid rgba(255, 217, 130, 0.24);
+        border-radius: 12px;
+        background: rgba(255, 241, 199, 0.08);
+      }
+
+      .econ-label {
+        color: var(--text-dim);
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .econ-value {
+        margin-top: 4px;
+        font-size: 26px;
+        font-weight: 900;
+      }
+
+      .selection {
+        padding: 12px;
+      }
+
+      .section-title {
+        margin: 0 0 10px;
+        color: var(--gold);
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .selection-name {
+        font-size: 21px;
+        font-weight: 900;
+      }
+
+      .badges,
+      .stats,
+      .queue {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .badge,
+      .stat,
+      .queue-chip {
+        padding: 4px 8px;
+        border: 1px solid rgba(255, 217, 130, 0.16);
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 800;
+        background: rgba(8, 18, 21, 0.48);
+      }
+
+      .badge.player { color: var(--player); }
+      .badge.econ { color: var(--success); }
+
+      .order {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border: 1px solid rgba(114, 201, 255, 0.22);
+        border-radius: 12px;
+        background: rgba(17, 29, 34, 0.78);
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .commands {
+        display: grid;
+        gap: 10px;
+        min-height: 0;
+      }
+
+      .command-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 12px;
+      }
+
+      .command-tile {
+        display: grid;
+        grid-template-columns: 42px 1fr;
+        gap: 8px;
+        align-items: center;
+        min-height: 56px;
+        padding: 10px;
+        border: 1px solid rgba(255, 217, 130, 0.28);
+        border-radius: 12px;
+        background: linear-gradient(180deg, rgba(65, 91, 77, 0.9), rgba(31, 49, 42, 0.96));
+      }
+
+      .command-icon {
+        display: grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        border-radius: 10px;
+        color: #101519;
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        background: linear-gradient(180deg, var(--gold), var(--gold-dim));
+      }
+
+      .command-copy strong,
+      .command-copy span {
+        display: block;
+      }
+
+      .command-copy strong {
+        font-size: 13px;
+      }
+
+      .command-copy span {
+        color: var(--text-dim);
+        font-size: 11px;
+      }
+
+      .alerts {
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+      }
+
+      .alert {
+        position: relative;
+        padding: 10px 10px 10px 24px;
+        border: 1px solid rgba(255, 217, 130, 0.18);
+        border-radius: 10px;
+        background: rgba(8, 18, 21, 0.54);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .alert::before {
+        content: "";
+        position: absolute;
+        left: 10px;
+        top: 14px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+
+      .alert.warn::before { background: var(--warning); }
+      .alert.enemy::before { background: var(--enemy); }
+      .alert.ok::before { background: var(--success); }
+
+      .footer {
+        padding: 14px 16px;
+        border: 1px solid var(--line-soft);
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(20, 33, 37, 0.96), rgba(9, 17, 21, 0.92));
+      }
+
+      .footer strong {
+        color: var(--gold);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="intro">
+        <p class="eyebrow">UX Direction A</p>
+        <h1>Classic Red Alert Right Rail</h1>
+        <p>
+          This direction prioritizes nostalgic command-center readability: battlefield-first composition, a dense
+          right-side command stack, strong radar anchoring, gold-on-military panel contrast, and compact action tiles
+          that reduce explanation text.
+        </p>
+      </section>
+
+      <section class="board">
+        <div class="battlefield">
+          <div class="shoreline"></div>
+          <div class="road one"></div>
+          <div class="road two"></div>
+          <div class="road three"></div>
+
+          <div class="viewport-hud">
+            <div class="viewport-pill mode">Command Online</div>
+            <div class="viewport-pill selection">Dockyard Workers selected | Shore fish | Crew factory | Build dock</div>
+            <div class="viewport-pill hotkeys">LMB Select | RMB Order | A Attack-Move | T Attack | H Hold | S Stop</div>
+          </div>
+
+          <div class="unit player worker" style="left: 190px; top: 340px;"></div>
+          <div class="unit player worker" style="left: 228px; top: 358px;"></div>
+          <div class="unit player truck" style="left: 330px; top: 314px;"></div>
+          <div class="unit player guard" style="left: 520px; top: 350px;"></div>
+          <div class="unit player boat" style="left: 480px; top: 118px;"></div>
+          <div class="unit enemy guard" style="left: 902px; top: 378px;"></div>
+          <div class="unit enemy boat" style="left: 806px; top: 140px;"></div>
+        </div>
+
+        <aside class="right-rail">
+          <section class="panel topbar">
+            <div>
+              <h2>Wambasa Fishing Wars</h2>
+              <div class="sub">Direction A / Dense classic command rail</div>
+            </div>
+            <div class="buttons">
+              <div class="pill-btn primary">Start</div>
+              <div class="pill-btn secondary">Pause</div>
+            </div>
+          </section>
+
+          <section class="panel radar">
+            <div class="radar-screen">
+              <div class="radar-grid"></div>
+              <div class="radar-dot player" style="left: 42px; top: 96px;"></div>
+              <div class="radar-dot player" style="left: 54px; top: 102px;"></div>
+              <div class="radar-dot player" style="left: 84px; top: 82px;"></div>
+              <div class="radar-dot resource" style="left: 114px; top: 110px;"></div>
+              <div class="radar-dot enemy" style="left: 186px; top: 90px;"></div>
+              <div class="radar-dot enemy" style="left: 168px; top: 54px;"></div>
+            </div>
+            <div class="economy">
+              <div class="econ-block">
+                <div class="econ-label">Metal</div>
+                <div class="econ-value">640</div>
+              </div>
+              <div class="econ-block">
+                <div class="econ-label">Cash</div>
+                <div class="econ-value">325</div>
+              </div>
+              <div class="econ-block">
+                <div class="econ-label">Crew</div>
+                <div class="econ-value">9 / 14</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel selection">
+            <div class="section-title">Selection</div>
+            <div class="selection-name">Dockyard Worker</div>
+            <div class="badges" style="margin-top: 8px;">
+              <div class="badge player">Player</div>
+              <div class="badge econ">Worker</div>
+              <div class="badge">Reel Equipped</div>
+            </div>
+            <div class="stats" style="margin-top: 10px;">
+              <div class="stat">HP 100</div>
+              <div class="stat">Shore Fish</div>
+              <div class="stat">Build</div>
+              <div class="stat">Crew Factory</div>
+            </div>
+            <div class="order">Order: Reporting to factory crew. Factory selected and ready.</div>
+          </section>
+
+          <section class="panel commands">
+            <div class="command-grid">
+              <div class="command-tile">
+                <div class="command-icon">HS</div>
+                <div class="command-copy"><strong>Plan House</strong><span>120 metal</span></div>
+              </div>
+              <div class="command-tile">
+                <div class="command-icon">DK</div>
+                <div class="command-copy"><strong>Plan Dock</strong><span>160 metal</span></div>
+              </div>
+              <div class="command-tile">
+                <div class="command-icon">GT</div>
+                <div class="command-copy"><strong>Guard Tower</strong><span>220 metal</span></div>
+              </div>
+              <div class="command-tile">
+                <div class="command-icon">CR</div>
+                <div class="command-copy"><strong>Crew Factory</strong><span>Factory ready</span></div>
+              </div>
+              <div class="command-tile">
+                <div class="command-icon">RE</div>
+                <div class="command-copy"><strong>Equip Reel</strong><span>3 available</span></div>
+              </div>
+              <div class="command-tile">
+                <div class="command-icon">ST</div>
+                <div class="command-copy"><strong>Stop</strong><span>Cancel current order</span></div>
+              </div>
+            </div>
+            <div class="queue" style="padding: 0 12px 12px;">
+              <div class="queue-chip">1 Worker 2.4s</div>
+              <div class="queue-chip">2 Truck 6.1s</div>
+              <div class="queue-chip">3 Fish Boat 5.0s</div>
+            </div>
+          </section>
+
+          <section class="panel alerts">
+            <div class="section-title">Alerts & Orders</div>
+            <div class="alert warn">Enemy boat sighted near contested waters.</div>
+            <div class="alert enemy">Guard tower on east approach taking fire.</div>
+            <div class="alert ok">Factory reel workshop produced 1 reel.</div>
+          </section>
+        </aside>
+      </section>
+
+      <section class="footer">
+        <strong>Direction A summary:</strong>
+        battlefield-first composition, single integrated right rail, radar as the top visual anchor, dense command tiles,
+        low prose, high faction contrast, and fast threat scanning.
+      </section>
+    </div>
+  </body>
+</html>

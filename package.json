@@ -1,0 +1,27 @@
+{
+  "name": "wambasa-fishing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "build:art": "node -e \"console.log('ok - no art preview build step configured')\"",
+    "e2e": "playwright test",
+    "test:mvp": "playwright test tests/e2e/epic1-rts-foundation.spec.ts",
+    "test:architecture": "node tests/architecture/import-boundaries.mjs",
+    "test:art": "node tests/art/validate-unit-animation-manifest.mjs && node tests/art/validate-production-art-manifest.mjs",
+    "test:commands": "node tests/commands/run-command-tests.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.8.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "pixi.js": "^8.18.1"
+  }
+}

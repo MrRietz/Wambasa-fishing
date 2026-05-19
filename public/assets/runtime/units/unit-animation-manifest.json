@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "frameSize": { "width": 64, "height": 64 },
+  "anchor": { "x": 0.5, "y": 0.82 },
+  "directions": ["east", "south", "west", "north"],
+  "requiredActions": {
+    "worker": ["idle", "move", "build", "repair"],
+    "guard": ["idle", "move", "attack"],
+    "saboteur": ["idle", "move", "sabotage"]
+  },
+  "units": {
+    "worker": {
+      "format": "png",
+      "palette": { "body": "#5f8f66", "vest": "#f2cf78", "skin": "#f6d48a", "tool": "#bfc8c8" },
+      "actions": {
+        "idle": { "frameCount": 2, "fps": 2 },
+        "move": { "frameCount": 6, "fps": 10 },
+        "build": { "frameCount": 4, "fps": 7 },
+        "repair": { "frameCount": 4, "fps": 7 }
+      }
+    },
+    "guard": {
+      "format": "png",
+      "palette": { "body": "#506b55", "vest": "#d65f4f", "skin": "#f6d48a", "tool": "#ffd166" },
+      "actions": {
+        "idle": { "frameCount": 2, "fps": 2 },
+        "move": { "frameCount": 6, "fps": 10 },
+        "attack": { "frameCount": 4, "fps": 8 }
+      }
+    },
+    "saboteur": {
+      "format": "png",
+      "palette": { "body": "#4f5c72", "vest": "#b481ff", "skin": "#f6d48a", "tool": "#d9cffc" },
+      "actions": {
+        "idle": { "frameCount": 2, "fps": 2 },
+        "move": { "frameCount": 6, "fps": 10 },
+        "sabotage": { "frameCount": 4, "fps": 8 }
+      }
+    }
+  }
+}

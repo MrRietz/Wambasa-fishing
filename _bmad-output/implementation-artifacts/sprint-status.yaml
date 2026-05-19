@@ -1,0 +1,114 @@
+# generated: 2026-05-16T00:00:00+02:00
+# last_updated: 2026-05-18T00:00:00+02:00
+# project: Wambasa-fishing
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+#
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story has enough detail to implement next
+#   - in-progress: Developer actively working
+#   - review: Ready for code review
+#   - done: Story completed and covered by implementation/test evidence
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+generated: 2026-05-16T00:00:00+02:00
+last_updated: 2026-05-18T00:00:00+02:00
+project: Wambasa-fishing
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  epic-1: done
+  1-1-boot-the-pixijs-rts-reboot-from-src: done
+  1-2-create-the-rts-app-shell-and-render-layers: done
+  1-3-render-the-first-coastal-skirmish-map: done
+  1-4-implement-canonical-camera-state: done
+  1-5-implement-rts-minimap-click-and-drag: done
+  1-6-add-world-space-rts-overlays: done
+  1-7-add-epic-1-smoke-tests: done
+  epic-1-retrospective: optional
+
+  epic-2: done
+  2-1-create-entity-store-and-basic-units: done
+  2-2-select-units-and-buildings: done
+  2-3-drag-select-and-shift-select-units: done
+  2-4-issue-move-commands: done
+  2-5-reject-invalid-commands-with-feedback: done
+  2-6-implement-land-pathfinding: done
+  2-7-prevent-unit-overlap-with-collision-and-reservation: done
+  2-8-add-movement-and-command-tests: done
+  epic-2-retrospective: optional
+
+  epic-3: done
+  3-1-add-factory-command-center: done
+  3-2-add-metal-fields-and-harvest-commands: done
+  3-3-implement-truck-cargo-return-and-unload: done
+  3-4-add-resource-bar-for-metal: done
+  3-5-add-basic-production-queue: done
+  epic-3-retrospective: optional
+
+  epic-4: in-progress
+  4-1-enter-building-placement-mode: done
+  4-2-validate-building-placement: done
+  4-3-construct-buildings-with-workers: done
+  4-4-build-house-and-expand-crew-capacity: done
+  4-5-build-dock-on-shoreline: done
+  4-6-repair-buildings: done
+  epic-4-retrospective: optional
+
+  epic-5: done
+  5-1-produce-fishing-boats-from-dock: done
+  5-2-move-boats-on-water: done
+  5-3-fish-in-fishing-zones: done
+  5-4-return-to-dock-and-sell-fish: done
+  5-5-test-the-land-sea-economy-bridge: done
+  epic-5-retrospective: optional
+
+  epic-6: done
+  6-1-spawn-ai-rival-base-and-economy: done
+  6-2-ai-harvests-and-produces: done
+  6-3-ai-builds-dock-and-fishes: done
+  6-4-ai-raids-exposed-economy: done
+  6-5-win-and-lose-a-skirmish: done
+  epic-6-retrospective: optional
+
+  epic-7: in-progress
+  7-1-add-guard-unit-and-basic-attacks: done
+  7-2-add-damage-states-for-units-and-buildings: done
+  7-3-add-saboteur-disruption: done
+  7-4-sink-boats-and-repair-damage: done
+  7-5-combat-and-sabotage-tests: done
+  7-6-build-defensive-structures: done
+  7-7-defensive-buildings-auto-engage-raiders: done
+  epic-7-retrospective: optional
+
+  epic-8: done
+  8-0-production-imagegen-art-batch: done
+  8-1-implement-animation-state-resolver: done
+  8-2-add-worker-truck-boat-and-building-animation-sets: done
+  8-3-implement-rts-hud-and-command-panel: done
+  8-4-add-audio-unlock-music-and-sfx-buses: done
+  8-5-persist-settings: done
+  8-6-add-ux-and-debug-overlay-polish: done
+  epic-8-retrospective: optional
+
+  epic-9: in-progress
+  9-1-add-first-skirmish-objective-flow: done
+  9-2-balance-the-first-skirmish-loop: done
+  9-3-add-match-restart-and-results-summary: done
+  9-4-performance-and-browser-compatibility-pass: done
+  9-5-mvp-regression-test-suite: done
+  epic-9-retrospective: optional
