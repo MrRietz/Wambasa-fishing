@@ -85,7 +85,13 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
 
   appRoot.innerHTML = `
     <section class="rts-shell" aria-label="Wambasa Fishing Wars RTS shell">
-      <p id="boot-status" class="rts-visually-hidden">Loading PixiJS command shell...</p>
+      <div class="rts-loading-screen" aria-live="polite" aria-busy="true">
+        <div class="rts-loading-panel">
+          <div class="rts-loading-title">Wambasa Fishing Wars</div>
+          <p id="boot-status">Loading PixiJS command shell...</p>
+          <div class="rts-loading-meter" aria-hidden="true"><span></span></div>
+        </div>
+      </div>
       <main id="rts-game" class="rts-game" aria-label="RTS game viewport" tabindex="0">
         <div id="viewport-hud" class="rts-viewport-hud" aria-hidden="true">
           <div id="viewport-mode-readout" class="rts-viewport-mode">Command online</div>
