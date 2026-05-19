@@ -149,7 +149,7 @@ export async function loadUnitSpriteTextures(): Promise<void> {
   textures.clear();
   for (const path of paths) {
     try {
-      const texture = await Assets.load<Texture>(path);
+      const texture = await Assets.load<Texture>(resolvePublicAssetPath(path));
       textures.set(path, texture);
     } catch (error) {
       if (!optionalSpritePaths.has(path)) {
@@ -375,6 +375,13 @@ function cardinalFallbackDirection(direction: AnimationDirection): CardinalAnima
 
 function getVehicleSpritePath(kind: VehicleSpriteKind, action: AnimationAction, direction: AnimationDirection, frame: number): string {
   return `/assets/runtime/units/${kind}/${action}/${direction}/${String(frame).padStart(2, '0')}.png`;
+}
+
+function resolvePublicAssetPath(path: string): string {
+  if (!path.startsWith('/')) return path;
+  const base = import.meta.env.BASE_URL || '/';
+  const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+  return `${normalizedBase}${path.slice(1)}`;
 }
 
 function resolveBuildingSpriteKind(kind: EntityKind): BuildingSpriteKind | undefined {
