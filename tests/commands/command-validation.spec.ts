@@ -16,8 +16,10 @@ import {
 import { tickAiCoordinator, type AiControllerState } from '../../src/game/ai/aiCoordinator';
 import { updateAiDefenseResponse } from '../../src/game/ai/aiDefenseSystem';
 import { chooseAiRaidAttacker, findAiTerritoryThreat } from '../../src/game/ai/aiPressureSystem';
-import type { BuildingPlanKind } from '../../src/game/data/buildings';
+import { buildingCatalog, type BuildingPlanKind } from '../../src/game/data/buildings';
+import { productionCatalog } from '../../src/game/data/production';
 import type { EntityKind, Faction, GameEntity } from '../../src/game/entities/components';
+import { createAttackBoatEntity, createBoatEntity, createEnemyAttackBoatEntity, createEnemyBoatEntity } from '../../src/game/entities/entityFactory';
 import { createSkirmishBootstrap } from '../../src/game/entities/skirmishSetup';
 import { resolveAnimationAction } from '../../src/game/render/animationState';
 import { updateAutoDefenseSystem, updateCombatAttackers } from '../../src/game/simulation/systems/combatSystem';
@@ -560,6 +562,42 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'production and construction timings are readable instead of instant',
+    run: () => {
+      assert.deepEqual(
+        Object.fromEntries(Object.entries(productionCatalog).map(([key, value]) => [key, value.seconds])),
+        {
+          worker: 3.6,
+          guard: 4.2,
+          saboteur: 4.8,
+          truck: 5.2,
+          boat: 5.8,
+          attackBoat: 6.6,
+        },
+      );
+      assert.deepEqual(
+        Object.fromEntries(Object.entries(buildingCatalog).map(([key, value]) => [key, value.seconds])),
+        {
+          house: 4.5,
+          dock: 6.5,
+          guardTower: 7.5,
+          techLab: 9.5,
+          barracks: 8.5,
+          factory: 12,
+        },
+      );
+    },
+  },
+  {
+    name: 'fishing boats are slower than combat boats',
+    run: () => {
+      assert.equal(createBoatEntity('boat-1', 'Fishing Boat', 0, 0).movement.speed, 68);
+      assert.equal(createEnemyBoatEntity('enemy-boat-1', 'Fishing Boat', 0, 0).movement.speed, 68);
+      assert.equal(createAttackBoatEntity('attack-boat-1', 'Attack Boat', 0, 0).movement.speed, 78);
+      assert.equal(createEnemyAttackBoatEntity('enemy-attack-boat-1', 'Attack Boat', 0, 0).movement.speed, 78);
+    },
+  },
+  {
     name: 'build placement rejects invalid footprint before creating site',
     run: () => {
       const builder = makeEntity({ id: 'worker-1', kind: 'worker' });
@@ -641,6 +679,38 @@ const tests: TestCase[] = [
       assert.equal(genericPathCalls, 0);
       assert.equal(entityPathCalls, 1);
       assert.equal(stockpile.metal, 340);
+    },
+  },
+  {
+    name: 'build placement tries alternate construction sides when the first side is unreachable',
+    run: () => {
+      const builder = makeEntity({ id: 'worker-1', kind: 'worker' });
+      const stockpile = { metal: 500 };
+      const attemptedGoals: PathPoint[] = [];
+      const output = executePlacementCommand({
+        building: 'house',
+        x: 100,
+        y: 100,
+        builder,
+        stockpile,
+        nextBuildingSiteId: 1,
+        validatePlacement: () => ({ valid: true, reason: 'valid' }),
+        createConstructionSite: (id, building, _x, _y, builderId) => makeConstructionSite(id, building, builderId),
+        getConstructionWorkPoint: () => ({ x: 110, y: 100 }),
+        getConstructionWorkPoints: () => [{ x: 110, y: 100 }, { x: 70, y: 100 }, { x: 100, y: 150 }],
+        findLandPath: () => [],
+        findEntityLandPath: (_entity, _start, goal) => {
+          attemptedGoals.push(goal);
+          return goal.y > 120 ? [goal] : [];
+        },
+      });
+
+      assert.equal(output.result?.ok, true);
+      assert.equal(output.moveCommand?.x, 100);
+      assert.equal(output.moveCommand?.y, 150);
+      assert.deepEqual(attemptedGoals, [{ x: 110, y: 100 }, { x: 70, y: 100 }, { x: 100, y: 150 }]);
+      assert.deepEqual(builder.moveTarget, { x: 100, y: 150 });
+      assert.equal(stockpile.metal, 380);
     },
   },
   {

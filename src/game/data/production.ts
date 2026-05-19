@@ -11,12 +11,12 @@ export interface ProductionDefinition {
 }
 
 export const productionCatalog: Record<ProductionKind, ProductionDefinition> = {
-  worker: { label: 'Worker', cost: 80, seconds: 1.2, crewCost: 1 },
-  guard: { label: 'Guard', cost: 120, cashCost: 20, seconds: 1.4, crewCost: 1 },
-  saboteur: { label: 'Saboteur', cost: 150, cashCost: 40, seconds: 1.5, crewCost: 1 },
-  truck: { label: 'Metal Hauler', cost: 180, seconds: 1.6, crewCost: 2 },
-  boat: { label: 'Fishing Boat', cost: 140, cashCost: 40, seconds: 1.5, crewCost: 2 },
-  attackBoat: { label: 'Attack Boat', cost: 180, cashCost: 80, seconds: 1.8, crewCost: 3 },
+  worker: { label: 'Worker', cost: 80, seconds: 3.6, crewCost: 1 },
+  guard: { label: 'Guard', cost: 120, cashCost: 20, seconds: 4.2, crewCost: 1 },
+  saboteur: { label: 'Saboteur', cost: 150, cashCost: 40, seconds: 4.8, crewCost: 1 },
+  truck: { label: 'Metal Hauler', cost: 180, seconds: 5.2, crewCost: 2 },
+  boat: { label: 'Fishing Boat', cost: 140, cashCost: 40, seconds: 5.8, crewCost: 2 },
+  attackBoat: { label: 'Attack Boat', cost: 180, cashCost: 80, seconds: 6.6, crewCost: 3 },
 };
 
 export function formatProductionCost(definition: ProductionDefinition): string {

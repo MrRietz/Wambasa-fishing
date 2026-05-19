@@ -34,6 +34,7 @@ export interface CreateAiRuntimeOptions {
   spawnAiProducedUnit: (product: ProductionKind, producer: GameEntity) => GameEntity;
   createEnemyConstructionSite: (id: string, building: BuildingPlanKind, x: number, y: number, builderId: string) => GameEntity;
   getConstructionWorkPoint: (site: GameEntity) => PathPoint;
+  getConstructionWorkPoints?: (site: GameEntity) => PathPoint[];
   getNextProductionId: () => number;
   setNextProductionId: (value: number) => void;
   getNextEnemyDockId: () => number;
@@ -230,17 +231,15 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     }
 
     const site = options.createEnemyConstructionSite(input.id, input.building, input.x, input.y, builder.id);
-    const workPoint = options.getConstructionWorkPoint(site);
-    const path = options.findEntityLandPath?.(builder, { x: builder.x, y: builder.y }, workPoint)
-      ?? options.findLandPath({ x: builder.x, y: builder.y }, workPoint);
-    if (path.length === 0) {
+    const route = findReachableConstructionRoute(builder, site);
+    if (!route) {
       options.aiController.lastAction = `Rival ${definition.label.toLowerCase()} blocked: no land route reaches the construction site.`;
       return false;
     }
 
     options.aiEconomyState.metal -= definition.cost;
-    builder.path = path;
-    builder.moveTarget = path[0];
+    builder.path = route.path;
+    builder.moveTarget = route.path[0];
     builder.movement.state = 'moving';
     builder.economy = {
       ...builder.economy,
@@ -259,6 +258,18 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     options.drawDestinationOverlay(input.layers);
     options.publishDebugState(input.layers);
     return true;
+  }
+
+  function findReachableConstructionRoute(builder: GameEntity, site: GameEntity): { workPoint: PathPoint; path: PathPoint[] } | null {
+    const workPoints = options.getConstructionWorkPoints?.(site) ?? [options.getConstructionWorkPoint(site)];
+    for (const workPoint of workPoints) {
+      const path = options.findEntityLandPath?.(builder, { x: builder.x, y: builder.y }, workPoint)
+        ?? options.findLandPath({ x: builder.x, y: builder.y }, workPoint);
+      if (path.length > 0) {
+        return { workPoint, path };
+      }
+    }
+    return null;
   }
 
   function buildAiDock(layers: RenderLayers): boolean {

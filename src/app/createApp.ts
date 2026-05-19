@@ -1462,8 +1462,8 @@ function getFactoryReelBuildSeconds(): number {
 
 function getBoatSpeed(entity: GameEntity): number {
   const level = getFactionUpgradeLevel(entity.faction, 'boats');
-  const baseSpeed = entity.economy?.combatRole === 'attack' ? 112 : 104;
-  return baseSpeed + level * 4;
+  const baseSpeed = entity.economy?.combatRole === 'attack' ? 78 : 68;
+  return baseSpeed + level * 3;
 }
 
 function refreshFactionBoatUpgrades(faction: Faction): void {
@@ -1983,7 +1983,7 @@ function issueWorkerFishUnloadCommand(bank: GameEntity, layers: RenderLayers): b
     executeWorkerFishUnloadCommand({
       bank,
       selectedUnits: getSelectedPlayerCommandableUnits(),
-      findEntityLandPath,
+      findEntityLandPath: (entity, start, goal) => findWorkerFishUnloadPath(entity, bank, start, goal),
       getWorkerFishDropOffPoint,
     }),
     layers,
@@ -2516,7 +2516,7 @@ function queueWorkerFishUnload(worker: GameEntity): { ok: true; bank: GameEntity
   const candidateBanks = getFriendlyFishBanks(worker.faction)
     .map((bank) => {
       const target = getFishBankDropOffPoint(bank, worker);
-      const path = findEntityLandPath(worker, { x: worker.x, y: worker.y }, target);
+      const path = findWorkerFishUnloadPath(worker, bank, { x: worker.x, y: worker.y }, target);
       return { bank, path, target };
     })
     .filter((assignment) => assignment.path.length > 0)
@@ -2793,6 +2793,12 @@ const aiRuntime = createAiRuntime({
       : site.kind === 'dock'
         ? getDockLandDropOffPoint(site)
         : getConstructionWorkPoint(site),
+  getConstructionWorkPoints: (site) =>
+    site.kind === 'dock' && site.faction === 'enemy'
+      ? [{ x: site.x, y: site.y + 145 }, ...getConstructionWorkPoints(site)]
+      : site.kind === 'dock'
+        ? [getDockLandDropOffPoint(site), ...getConstructionWorkPoints(site)]
+        : getConstructionWorkPoints(site),
   getNextProductionId: () => nextProductionId,
   setNextProductionId: (value) => {
     nextProductionId = value;
@@ -3611,6 +3617,22 @@ function findEntityLandPath(
   );
 }
 
+function findWorkerFishUnloadPath(
+  worker: GameEntity,
+  bank: GameEntity,
+  start: { x: number; y: number },
+  goal: { x: number; y: number },
+): Array<{ x: number; y: number }> {
+  const previousEconomy = worker.economy;
+  worker.economy = {
+    ...worker.economy,
+    unloadingFish: { targetId: bank.id, phase: bank.kind === 'dock' ? 'to-dock' : 'to-bank' },
+  };
+  const path = findEntityLandPath(worker, start, goal);
+  worker.economy = previousEconomy;
+  return path;
+}
+
 function findTruckLandPath(
   truck: GameEntity,
   start: { x: number; y: number },
@@ -3794,6 +3816,37 @@ function completeNearbyHarvestArrival(entity: GameEntity, layers: RenderLayers):
   return true;
 }
 
+function completeNearbyWorkerFishUnloadArrival(entity: GameEntity, layers: RenderLayers): boolean {
+  const unloadingFish = entity.economy?.unloadingFish;
+  const cargo = entity.economy?.cargo;
+  if (entity.kind !== 'worker' || !unloadingFish || !cargo || cargo.kind !== 'fish' || cargo.amount <= 0) {
+    return false;
+  }
+
+  const bank = entities.find((candidate) => candidate.id === unloadingFish.targetId);
+  if (!bank || getDamageState(bank) === 'destroyed') {
+    return false;
+  }
+
+  const dropOff = getFishBankDropOffPoint(bank, entity);
+  const dropOffReach = getCollisionRadius(entity) + 44;
+  const bankReach = bank.collider.kind === 'rect'
+    ? Math.max(bank.collider.width, bank.collider.height) * 0.48 + getCollisionRadius(entity) + 28
+    : getCollisionRadius(entity) + getCollisionRadius(bank) + 36;
+  const nearDropOff = Math.hypot(entity.x - dropOff.x, entity.y - dropOff.y) <= dropOffReach;
+  const nearBank = Math.hypot(entity.x - bank.x, entity.y - bank.y) <= bankReach;
+  if (!nearDropOff && !nearBank) {
+    return false;
+  }
+
+  entity.path = [];
+  entity.moveTarget = undefined;
+  entity.movement.state = 'idle';
+  movementRecoveryState.delete(entity.id);
+  completeArrival(entity, layers);
+  return true;
+}
+
 function completeNearbyBuildArrival(entity: GameEntity, layers: RenderLayers): boolean {
   const buildJob = entity.economy?.buildJob;
   if (entity.kind !== 'worker' || buildJob?.phase !== 'to-site') {
@@ -3895,6 +3948,10 @@ function updateEntityMovement(deltaSeconds: number, layers: RenderLayers): boole
           moved = true;
           continue;
         }
+        if (completeNearbyWorkerFishUnloadArrival(entity, layers)) {
+          moved = true;
+          continue;
+        }
         if (nudgeLandMobileOutOfBlockers(entity)) {
           recoverLandMovement(entity);
           movementRecoveryState.set(entity.id, { x: entity.x, y: entity.y, stagnantSeconds: 0 });
@@ -3934,6 +3991,10 @@ function updateEntityMovement(deltaSeconds: number, layers: RenderLayers): boole
         continue;
       }
       if (completeNearbyHarvestArrival(entity, layers)) {
+        moved = true;
+        continue;
+      }
+      if (completeNearbyWorkerFishUnloadArrival(entity, layers)) {
         moved = true;
         continue;
       }
@@ -4801,4 +4862,31 @@ export async function createWambasaRtsApp(): Promise<void> {
 
     const resizeObserver = new ResizeObserver(() => applyCamera(app, layers));
     resizeObserver.observe(gameElement);
-    document.addEventListener('fullscreenchange', focusGame
+    document.addEventListener('fullscreenchange', focusGameViewport);
+    updateMatchResultPanel();
+    updateEconomyReadout();
+    applyCamera(app, layers);
+
+    skirmishButton.disabled = false;
+    skirmishButton.addEventListener('click', () => {
+      void Promise.all([unlockAudio(), requestPlayFullscreen()]).then(() => {
+        skirmishStarted = true;
+        pauseMenuOpen = false;
+        syncPauseUi();
+        focusGameViewport();
+        setBootStatus(
+          'ready',
+          audioState.unlocked
+            ? 'Skirmish started. Use arrows/WASD, edge scroll, right/middle drag, wheel zoom, minimap drag, and F10 for the menu.'
+            : 'Skirmish started. Audio unavailable in this browser; controls and F10 menu are ready.',
+        );
+        publishDebugState(layers);
+      });
+    });
+
+    setBootStatus('ready', 'PixiJS RTS foundation ready.');
+  } catch (error) {
+    console.error('Failed to boot RTS shell.', error);
+    setBootStatus('failed', 'Failed to boot RTS shell. Check the console.');
+  }
+}
