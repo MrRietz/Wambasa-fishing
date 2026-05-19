@@ -770,7 +770,7 @@ button {
   height: 24px;
   content: "";
   transform: translateY(-50%);
-  background-image: url("/assets/runtime/ui/command-icons-sheet-v1.png");
+  background-image: url("../assets/runtime/ui/command-icons-sheet-v1.png");
   background-repeat: no-repeat;
   background-size: 600% 400%;
   background-position: var(--command-icon-x) var(--command-icon-y);

@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "sourceBatch": "g8-production-core-asset-sheet-v1",
-  "styleBoard": "/assets/generated/g8-production/style-board-v1.png",
-  "processedSheet": "/assets/processed/g8-production/core-asset-sheet-v1-alpha.png",
-  "runtimeRoot": "/assets/runtime/g8-production/",
+  "styleBoard": "assets/generated/g8-production/style-board-v1.png",
+  "processedSheet": "assets/processed/g8-production/core-asset-sheet-v1-alpha.png",
+  "runtimeRoot": "assets/runtime/g8-production/",
   "requiredProductionBatch": {
     "backdrop": [
       "nordic-coastal-terrain-set"
@@ -44,175 +44,175 @@
   },
   "assets": {
     "nordic-coastal-terrain-set": {
-      "path": "/assets/processed/g8-production/terrain-backdrop-v1.png",
+      "path": "assets/processed/g8-production/terrain-backdrop-v1.png",
       "kind": "backdrop-source",
       "anchor": { "x": 0.5, "y": 0.5 },
       "notes": "First generated terrain backdrop candidate for the coastal RTS skirmish plate, normalized into processed assets for later map integration."
     },
     "factory-command-center": {
-      "path": "/assets/runtime/g8-production/buildings/factory-command-center-v1.png",
+      "path": "assets/runtime/g8-production/buildings/factory-command-center-v1.png",
       "kind": "building",
       "anchor": { "x": 0.5, "y": 0.86 },
       "notes": "Good first-pass silhouette and material target."
     },
     "dock": {
-      "path": "/assets/runtime/g8-production/buildings/dock-v1.png",
+      "path": "assets/runtime/g8-production/buildings/dock-v1.png",
       "kind": "building",
       "anchor": { "x": 0.5, "y": 0.82 },
       "notes": "Usable style target; final dock must be shoreline-footprint aligned."
     },
     "house": {
-      "path": "/assets/runtime/g8-production/buildings/house-v1.png",
+      "path": "assets/runtime/g8-production/buildings/house-v1.png",
       "kind": "building",
       "anchor": { "x": 0.5, "y": 0.86 },
       "notes": "First production bitmap House/Barracks cutout generated from the house/tower sheet."
     },
     "guard-tower": {
-      "path": "/assets/runtime/g8-production/buildings/guard-tower-v1.png",
+      "path": "assets/runtime/g8-production/buildings/guard-tower-v1.png",
       "kind": "building",
       "anchor": { "x": 0.5, "y": 0.86 },
       "notes": "First production bitmap Guard Tower cutout generated from the house/tower sheet."
     },
     "house-tower-sheet": {
-      "path": "/assets/processed/g8-production/buildings/house-tower-sheet-v1-alpha.png",
+      "path": "assets/processed/g8-production/buildings/house-tower-sheet-v1-alpha.png",
       "kind": "building-source",
-      "runtimeFrames": "/assets/runtime/g8-production/buildings/{building}-v1.png",
+      "runtimeFrames": "assets/runtime/g8-production/buildings/{building}-v1.png",
       "anchor": { "x": 0.5, "y": 0.86 },
       "notes": "Imagegen source sheet for House/Barracks and Guard Tower production cutouts."
     },
     "worker": {
-      "path": "/assets/runtime/g8-production/units/worker-v1.png",
+      "path": "assets/runtime/g8-production/units/worker-v1.png",
       "kind": "unit-static",
       "anchor": { "x": 0.5, "y": 0.94 },
       "notes": "Static concept cutout only. Too portrait-like for final RTS animation frames."
     },
     "worker-directional-sheet": {
-      "path": "/assets/processed/g8-production/units/worker-directional-sheet-v1-alpha.png",
+      "path": "assets/processed/g8-production/units/worker-directional-sheet-v1-alpha.png",
       "kind": "unit-animation-source",
-      "runtimeFrames": "/assets/runtime/units/worker/{action}/{direction}/{frame}.png",
+      "runtimeFrames": "assets/runtime/units/worker/{action}/{direction}/{frame}.png",
       "anchor": { "x": 0.5, "y": 0.82 },
       "notes": "First production bitmap worker animation sheet. Runtime currently uses idle, move, build, and repair PNG frames extracted from this sheet."
     },
     "guard-directional-sheet": {
-      "path": "/assets/processed/g8-production/units/guard-directional-sheet-v1-alpha.png",
+      "path": "assets/processed/g8-production/units/guard-directional-sheet-v1-alpha.png",
       "kind": "unit-animation-source",
-      "runtimeFrames": "/assets/runtime/units/guard/{action}/{direction}/{frame}.png",
+      "runtimeFrames": "assets/runtime/units/guard/{action}/{direction}/{frame}.png",
       "anchor": { "x": 0.5, "y": 0.82 },
       "notes": "First production bitmap guard animation sheet. Runtime currently uses idle, move, and attack PNG frames extracted from this sheet."
     },
     "saboteur-directional-sheet": {
-      "path": "/assets/processed/g8-production/units/saboteur-directional-sheet-v1-alpha.png",
+      "path": "assets/processed/g8-production/units/saboteur-directional-sheet-v1-alpha.png",
       "kind": "unit-animation-source",
-      "runtimeFrames": "/assets/runtime/units/saboteur/{action}/{direction}/{frame}.png",
+      "runtimeFrames": "assets/runtime/units/saboteur/{action}/{direction}/{frame}.png",
       "anchor": { "x": 0.5, "y": 0.82 },
       "notes": "First production bitmap saboteur animation sheet. Runtime currently uses idle, move, and sabotage PNG frames extracted from this sheet."
     },
     "harvester-truck": {
-      "path": "/assets/runtime/g8-production/units/harvester-truck-v1.png",
+      "path": "assets/runtime/g8-production/units/harvester-truck-v1.png",
       "kind": "vehicle",
       "anchor": { "x": 0.5, "y": 0.78 },
       "notes": "Good first-pass shape; final sheet needs empty/full cargo variants and wheel frames."
     },
     "truck-directional-sheet": {
-      "path": "/assets/processed/g8-production/units/truck-directional-sheet-v1-alpha.png",
+      "path": "assets/processed/g8-production/units/truck-directional-sheet-v1-alpha.png",
       "kind": "vehicle-animation-source",
-      "runtimeFrames": "/assets/runtime/units/truck/{action}/{direction}/{frame}.png",
+      "runtimeFrames": "assets/runtime/units/truck/{action}/{direction}/{frame}.png",
       "anchor": { "x": 0.5, "y": 0.82 },
       "notes": "First production bitmap truck sheet. Runtime currently uses move and harvest PNG frames; procedural fallback still handles damaged/destroyed."
     },
     "fishing-boat": {
-      "path": "/assets/runtime/g8-production/units/fishing-boat-v1.png",
+      "path": "assets/runtime/g8-production/units/fishing-boat-v1.png",
       "kind": "boat",
       "anchor": { "x": 0.5, "y": 0.78 },
       "notes": "Good first-pass shape; final sheet needs wake/fishing/unload state variants."
     },
     "boat-directional-sheet": {
-      "path": "/assets/processed/g8-production/units/boat-directional-sheet-v1-alpha.png",
+      "path": "assets/processed/g8-production/units/boat-directional-sheet-v1-alpha.png",
       "kind": "vehicle-animation-source",
-      "runtimeFrames": "/assets/runtime/units/boat/{action}/{direction}/{frame}.png",
+      "runtimeFrames": "assets/runtime/units/boat/{action}/{direction}/{frame}.png",
       "anchor": { "x": 0.5, "y": 0.82 },
       "notes": "First production bitmap boat sheet. Runtime currently uses move and fish PNG frames; procedural fallback still handles damaged/destroyed."
     },
     "metal-field": {
-      "path": "/assets/runtime/g8-production/resources/metal-field-v1.png",
+      "path": "assets/runtime/g8-production/resources/metal-field-v1.png",
       "kind": "resource",
       "anchor": { "x": 0.5, "y": 0.78 },
       "notes": "Usable metal field target; final needs depletion states."
     },
     "fishing-zone-marker": {
-      "path": "/assets/runtime/g8-production/resources/fishing-zone-marker-v2.png",
+      "path": "assets/runtime/g8-production/resources/fishing-zone-marker-v2.png",
       "kind": "resource-marker",
       "anchor": { "x": 0.5, "y": 0.5 },
       "notes": "Generated bitmap fishing zone marker with alpha-cleaned chroma removal, promoted into runtime resources."
     },
     "terrain-forest": {
-      "path": "/assets/runtime/g8-production/terrain-props/forest-v1.png",
+      "path": "assets/runtime/g8-production/terrain-props/forest-v1.png",
       "kind": "terrain-prop",
       "anchor": { "x": 0.5, "y": 0.78 },
       "notes": "Runtime blocker prop for forested impassable terrain."
     },
     "terrain-rocks": {
-      "path": "/assets/runtime/g8-production/terrain-props/rocks-v1.png",
+      "path": "assets/runtime/g8-production/terrain-props/rocks-v1.png",
       "kind": "terrain-prop",
       "anchor": { "x": 0.5, "y": 0.78 },
       "notes": "Runtime blocker prop for rock clusters."
     },
     "terrain-ridge": {
-      "path": "/assets/runtime/g8-production/terrain-props/ridge-v1.png",
+      "path": "assets/runtime/g8-production/terrain-props/ridge-v1.png",
       "kind": "terrain-prop",
       "anchor": { "x": 0.5, "y": 0.78 },
       "notes": "Runtime blocker prop for ridgelines and raised earth."
     },
     "terrain-cliff": {
-      "path": "/assets/runtime/g8-production/terrain-props/cliff-v1.png",
+      "path": "assets/runtime/g8-production/terrain-props/cliff-v1.png",
       "kind": "terrain-prop",
       "anchor": { "x": 0.5, "y": 0.78 },
       "notes": "Runtime blocker prop for cliff faces."
     },
     "terrain-marsh": {
-      "path": "/assets/runtime/g8-production/terrain-props/marsh-v1.png",
+      "path": "assets/runtime/g8-production/terrain-props/marsh-v1.png",
       "kind": "terrain-prop",
       "anchor": { "x": 0.5, "y": 0.78 },
       "notes": "Runtime blocker prop for marsh and wetland obstruction."
     },
     "construction-dust": {
-      "path": "/assets/runtime/g8-production/effects/construction-dust-v1.png",
+      "path": "assets/runtime/g8-production/effects/construction-dust-v1.png",
       "kind": "effect",
       "anchor": { "x": 0.5, "y": 0.5 },
       "notes": "Generated bitmap construction dust cutout extracted from the first production effects sheet."
     },
     "repair-sparks": {
-      "path": "/assets/runtime/g8-production/effects/repair-sparks-v1.png",
+      "path": "assets/runtime/g8-production/effects/repair-sparks-v1.png",
       "kind": "effect",
       "anchor": { "x": 0.5, "y": 0.5 },
       "notes": "Generated bitmap repair sparks cutout extracted from the first production effects sheet."
     },
     "harvest-sparks": {
-      "path": "/assets/runtime/g8-production/effects/harvest-sparks-v1.png",
+      "path": "assets/runtime/g8-production/effects/harvest-sparks-v1.png",
       "kind": "effect",
       "anchor": { "x": 0.5, "y": 0.5 },
       "notes": "Generated bitmap harvest sparks cutout extracted from the first production effects sheet."
     },
     "fish-splash": {
-      "path": "/assets/runtime/g8-production/effects/fish-splash-v1.png",
+      "path": "assets/runtime/g8-production/effects/fish-splash-v1.png",
       "kind": "effect",
       "anchor": { "x": 0.5, "y": 0.5 },
       "notes": "Generated bitmap fish splash cutout extracted from the first production effects sheet."
     },
     "cannon-muzzle-flash": {
-      "path": "/assets/runtime/g8-production/effects/cannon-muzzle-flash-v1.png",
+      "path": "assets/runtime/g8-production/effects/cannon-muzzle-flash-v1.png",
       "kind": "effect",
       "anchor": { "x": 0.5, "y": 0.5 },
       "notes": "Generated bitmap cannon muzzle flash cutout extracted from the first production effects sheet."
     },
     "sabotage-burst": {
-      "path": "/assets/runtime/g8-production/effects/sabotage-burst-v1.png",
+      "path": "assets/runtime/g8-production/effects/sabotage-burst-v1.png",
       "kind": "effect",
       "anchor": { "x": 0.5, "y": 0.5 },
       "notes": "Generated bitmap sabotage burst cutout extracted from the first production effects sheet."
     },
     "smoke-plume": {
-      "path": "/assets/runtime/g8-production/effects/smoke-plume-v1.png",
+      "path": "assets/runtime/g8-production/effects/smoke-plume-v1.png",
       "kind": "effect",
       "anchor": { "x": 0.5, "y": 0.5 },
       "notes": "Generated bitmap smoke plume cutout extracted from the first production effects sheet."

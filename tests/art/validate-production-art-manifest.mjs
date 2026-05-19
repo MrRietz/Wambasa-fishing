@@ -7,7 +7,7 @@ const manifestPath = join(root, 'public/assets/runtime/g8-production/production-
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 
 assert.equal(manifest.schemaVersion, 1, 'Unexpected production art manifest schema.');
-assert.ok(manifest.runtimeRoot.startsWith('/assets/runtime/g8-production/'), 'Runtime root must stay inside runtime assets.');
+assert.ok(manifest.runtimeRoot.startsWith('assets/runtime/g8-production/'), 'Runtime root must stay inside runtime assets.');
 
 const requiredGroups = ['backdrop', 'buildings', 'units', 'resources', 'blockers', 'effects'];
 for (const group of requiredGroups) {
@@ -21,13 +21,13 @@ for (const [assetId, asset] of Object.entries(manifest.assets)) {
   assert.ok(asset.anchor, `Asset ${assetId} must declare an anchor.`);
   assert.ok(typeof asset.anchor.x === 'number' && typeof asset.anchor.y === 'number', `Asset ${assetId} anchor must be numeric.`);
   assert.ok(asset.notes, `Asset ${assetId} must include integration notes.`);
-  assert.ok(asset.path.startsWith('/assets/'), `Asset ${assetId} path must stay within /assets.`);
+  assert.ok(asset.path.startsWith('assets/'), `Asset ${assetId} path must stay within assets.`);
 
-  const diskPath = join(root, 'public', asset.path.replace(/^\/assets\//, 'assets/'));
+  const diskPath = join(root, 'public', asset.path);
   assert.ok(existsSync(diskPath), `Missing production art asset file: ${diskPath}`);
 
   if (asset.kind.includes('runtime') || asset.kind === 'building' || asset.kind === 'vehicle' || asset.kind === 'boat' || asset.kind === 'resource' || asset.kind === 'resource-marker' || asset.kind === 'terrain-prop' || asset.kind === 'effect' || asset.kind === 'unit-static') {
-    assert.ok(!asset.path.includes('/generated/'), `Runtime-facing asset ${assetId} cannot point into generated assets.`);
+    assert.ok(!asset.path.includes('generated/'), `Runtime-facing asset ${assetId} cannot point into generated assets.`);
   }
 }
 
