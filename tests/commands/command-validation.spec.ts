@@ -15,6 +15,7 @@ import {
 } from '../../src/game/commands/commandHandlers';
 import { tickAiCoordinator, type AiControllerState } from '../../src/game/ai/aiCoordinator';
 import { updateAiDefenseResponse } from '../../src/game/ai/aiDefenseSystem';
+import { createAiIntelState, mergeObservedPlayerState, scanPlayerIntel, updateAdaptiveTactic } from '../../src/game/ai/aiIntelSystem';
 import { chooseAiRaidAttacker, findAiTerritoryThreat } from '../../src/game/ai/aiPressureSystem';
 import { buildingCatalog, type BuildingPlanKind } from '../../src/game/data/buildings';
 import { productionCatalog } from '../../src/game/data/production';
@@ -583,7 +584,7 @@ const tests: TestCase[] = [
           guardTower: 7.5,
           techLab: 9.5,
           barracks: 8.5,
-          factory: 12,
+          factory: 22,
         },
       );
     },
@@ -972,6 +973,33 @@ const tests: TestCase[] = [
 
       assert.equal(chooseAiRaidAttacker([worker], () => 'healthy'), null);
       assert.equal(chooseAiRaidAttacker([worker, guard], () => 'healthy')?.id, 'enemy-guard-1');
+    },
+  },
+  {
+    name: 'AI scout intel switches tactics toward exposed harbor pressure',
+    run: () => {
+      const intel = createAiIntelState('economicBoom');
+      const scout = makeEntity({ id: 'enemy-scout', kind: 'guard', faction: 'enemy' });
+      scout.x = 100;
+      scout.y = 100;
+      const dock = makeEntity({ id: 'player-dock', kind: 'dock', speed: 0, layer: 'buildings', economy: { health: 240 } });
+      dock.x = 150;
+      dock.y = 100;
+      const boat = makeEntity({ id: 'player-boat', kind: 'boat', economy: { health: 125, combatRole: 'fishing' } });
+      boat.x = 170;
+      boat.y = 125;
+      const scan = scanPlayerIntel({
+        entities: [scout, dock, boat],
+        scout,
+        deltaSeconds: 0.1,
+        getDamageState: () => 'healthy',
+      });
+
+      assert.ok(scan);
+      mergeObservedPlayerState(intel.observed, scan.observed);
+      assert.equal(updateAdaptiveTactic({ intel, openingStrategy: 'economicBoom', force: true }), true);
+      assert.equal(intel.tactic, 'harborControl');
+      assert.match(scan.report ?? '', /dock/);
     },
   },
   {

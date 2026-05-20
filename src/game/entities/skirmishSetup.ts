@@ -1,4 +1,5 @@
 import { FIRST_SKIRMISH_BALANCE } from '../config/constants';
+import { buildingCatalog } from '../data/buildings';
 import { skirmish01MapData } from '../data/maps/skirmish01';
 import type { MatchState, MatchStats, GameEntity } from './components';
 import type { CoastalMapData, FishingZoneState, ResourceField } from '../map/mapTypes';
@@ -91,7 +92,7 @@ export function createSkirmishBootstrap(): SkirmishBootstrap {
         collider: { kind: 'rect', width: 315, height: 210 },
         movement: { speed: 0, state: 'idle' },
         path: [],
-        economy: { health: 1200, productionQueue: [], dropOff: ['metal'], reelWorkshop: { reelProgressSeconds: 0, reelInventory: 0, autoSell: false } },
+        economy: { health: buildingCatalog.factory.health, productionQueue: [], dropOff: ['metal'], reelWorkshop: { reelProgressSeconds: 0, reelInventory: 0, autoSell: false } },
         animation: { state: 'idle', frame: 0 },
         renderable: { layer: 'buildings', tint: 0x4f8fc5 },
       },
@@ -108,7 +109,7 @@ export function createSkirmishBootstrap(): SkirmishBootstrap {
         collider: { kind: 'rect', width: 315, height: 210 },
         movement: { speed: 0, state: 'idle' },
         path: [],
-        economy: { health: 1200, productionQueue: [], dropOff: ['metal'], reelWorkshop: { reelProgressSeconds: 0, reelInventory: 0, autoSell: true } },
+        economy: { health: buildingCatalog.factory.health, productionQueue: [], dropOff: ['metal'], reelWorkshop: { reelProgressSeconds: 0, reelInventory: 0, autoSell: true } },
         animation: { state: 'idle', frame: 0 },
         renderable: { layer: 'buildings', tint: 0x98524b },
       },

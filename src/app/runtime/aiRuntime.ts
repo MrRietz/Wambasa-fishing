@@ -9,6 +9,16 @@ import { buildingCatalog, type BuildingPlanKind } from '../../game/data/building
 import type { ProductionKind } from '../../game/data/production';
 import { productionCatalog } from '../../game/data/production';
 import type { DamageState, GameEntity } from '../../game/entities/components';
+import {
+  chooseScoutTarget,
+  chooseScoutUnit,
+  ensureAiIntelState,
+  getAiTacticLabel,
+  mergeObservedPlayerState,
+  scanPlayerIntel,
+  updateAdaptiveTactic,
+  updateScoutTimers,
+} from '../../game/ai/aiIntelSystem';
 import { updateProductionQueues } from '../../game/simulation/systems/productionSystem';
 import type { FishingZoneState, ResourceField } from '../../game/map/mapTypes';
 import type { RenderLayers } from '../../game/render/layers';
@@ -52,6 +62,7 @@ export interface CreateAiRuntimeOptions {
   updateAiRaidActive: (deltaSeconds: number, layers: RenderLayers) => boolean;
   updateEnemyAutoDefense: (layers: RenderLayers) => boolean;
   issuePlayerAssetWarning: (target: GameEntity, phase: 'incoming' | 'damaged' | 'destroyed') => void;
+  announceAiScout: (message: string, focusWorld: PathPoint) => void;
   findReachableRaidPlan: (attacker: GameEntity, priority?: Array<GameEntity['kind']>) => { target: GameEntity; targetPoint: PathPoint; path: PathPoint[] } | undefined;
   getAiRaidTargetPriority: () => Array<GameEntity['kind']>;
   getAiRaidSquad: (leadAttacker: GameEntity, target: GameEntity) => GameEntity[];
@@ -64,6 +75,12 @@ export interface AiRuntime {
 }
 
 export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
+  function getAiIntel() {
+    options.aiController.intel = ensureAiIntelState(options.aiController.intel, options.aiController.strategy);
+    options.aiController.activeTactic = options.aiController.intel.tactic;
+    return options.aiController.intel;
+  }
+
   function issueAiHarvestCommand(layers: RenderLayers): boolean {
     const truck = options.entities.find(
       (entity) =>
@@ -541,8 +558,100 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     return true;
   }
 
+  function updateAiScouting(deltaSeconds: number, layers: RenderLayers): boolean {
+    const intel = getAiIntel();
+    updateScoutTimers(intel, deltaSeconds);
+
+    let changed = false;
+    const activeScout = intel.scout.scoutId
+      ? options.entities.find((entity) => entity.id === intel.scout.scoutId && options.getDamageState(entity) !== 'destroyed')
+      : undefined;
+    if (activeScout) {
+      const scan = scanPlayerIntel({
+        entities: options.entities,
+        scout: activeScout,
+        deltaSeconds,
+        getDamageState: options.getDamageState,
+      });
+      if (scan) {
+        mergeObservedPlayerState(intel.observed, scan.observed);
+        if (scan.report && intel.scout.reportCooldownSeconds <= 0) {
+          intel.lastScoutReport = scan.report;
+          intel.scout.reportCooldownSeconds = 18;
+          options.announceAiScout(scan.report, { x: activeScout.x, y: activeScout.y });
+          changed = true;
+        }
+        if (updateAdaptiveTactic({ intel, openingStrategy: options.aiController.strategy })) {
+          options.aiController.activeTactic = intel.tactic;
+          options.aiController.lastAction = `Rival switched to ${getAiTacticLabel(intel.tactic)} after scouting: ${intel.tacticReason}.`;
+          changed = true;
+        }
+      }
+
+      const target = intel.scout.targetId ? options.entities.find((entity) => entity.id === intel.scout.targetId) : undefined;
+      const reachedTarget = target ? Math.hypot(activeScout.x - target.x, activeScout.y - target.y) <= 260 : activeScout.movement.state === 'idle';
+      if (reachedTarget || activeScout.economy?.attack || activeScout.economy?.buildJob || activeScout.economy?.harvesting || activeScout.economy?.factoryDuty) {
+        if (reachedTarget) {
+          const home = options.entities.find((entity) => entity.kind === 'enemyFactory' && entity.faction === 'enemy' && options.getDamageState(entity) !== 'destroyed');
+          if (home) {
+            const returnPoint = { x: home.x - 140, y: home.y + 120 };
+            const returnPath = options.findEntityLandPath?.(activeScout, { x: activeScout.x, y: activeScout.y }, returnPoint)
+              ?? options.findLandPath({ x: activeScout.x, y: activeScout.y }, returnPoint);
+            if (returnPath.length > 0) {
+              activeScout.path = returnPath;
+              activeScout.moveTarget = returnPath[0];
+              activeScout.movement.state = 'moving';
+            }
+          }
+        }
+        intel.scout.scoutId = undefined;
+        intel.scout.targetId = undefined;
+        intel.scout.cooldownSeconds = Math.max(intel.scout.cooldownSeconds, 22);
+        changed = true;
+      }
+      return changed;
+    }
+
+    if (intel.scout.cooldownSeconds > 0 || options.aiController.startDelaySeconds > 0) {
+      return changed;
+    }
+
+    const scout = chooseScoutUnit(options.entities, options.getDamageState);
+    const target = chooseScoutTarget(options.entities, options.getDamageState);
+    if (!scout || !target) {
+      intel.scout.cooldownSeconds = 8;
+      return changed;
+    }
+
+    const scoutPoint = options.getStaggeredRaidApproachPoint(target, 0, 1);
+    const path = options.findEntityLandPath?.(scout, { x: scout.x, y: scout.y }, scoutPoint)
+      ?? options.findLandPath({ x: scout.x, y: scout.y }, scoutPoint);
+    if (path.length === 0) {
+      intel.scout.cooldownSeconds = 10;
+      return changed;
+    }
+
+    scout.path = path;
+    scout.moveTarget = path[0];
+    scout.movement.state = 'moving';
+    scout.economy = {
+      ...scout.economy,
+      attack: undefined,
+      shoreFishing: undefined,
+      factoryDuty: undefined,
+    };
+    intel.scout.scoutId = scout.id;
+    intel.scout.targetId = target.id;
+    intel.scout.cooldownSeconds = 34;
+    options.aiController.lastAction = `Rival scout probing toward ${target.name}.`;
+    options.renderUnits(layers);
+    options.drawDestinationOverlay(layers);
+    return true;
+  }
+
   function updateAiRival(deltaSeconds: number, layers: RenderLayers): boolean {
     refreshStaleEconomyOrders();
+    const scoutChanged = updateAiScouting(deltaSeconds, layers);
     const crewChanged = assignAiFactoryCrew(layers);
     let changed = tickAiCoordinator({
       deltaSeconds,
@@ -562,7 +671,7 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
       issueRaid: () => issueAiRaidCommand(layers),
       updateRaid: () => options.updateAiRaidActive(deltaSeconds, layers),
     });
-    changed = crewChanged || changed;
+    changed = scoutChanged || crewChanged || changed;
 
     changed = options.updateEnemyAutoDefense(layers) || changed;
 

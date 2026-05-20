@@ -2,6 +2,7 @@ import { buildingCatalog } from '../data/buildings';
 import { productionCatalog, type ProductionKind } from '../data/production';
 import type { RtsDebugState } from '../debug/debugState';
 import type { DamageState, GameEntity } from '../entities/components';
+import type { AiIntelState, AiTactic } from './aiIntelSystem';
 import { updateAiEconomyRebuildSystem } from './aiRebuildSystem';
 import { chooseAiBarracksProduction, chooseAiDockProduction, chooseAiFactoryProduction, findAiTerritoryThreat } from './aiPressureSystem';
 
@@ -9,6 +10,8 @@ export type AiStrategy = 'economicBoom' | 'harborPressure' | 'siege';
 
 export interface AiControllerState {
   strategy: AiStrategy;
+  activeTactic?: AiTactic;
+  intel?: AiIntelState;
   startDelaySeconds: number;
   raidDelaySeconds: number;
   territoryAlertCooldownSeconds: number;
@@ -64,6 +67,7 @@ export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
   const rebuildChanged = updateAiEconomyRebuildSystem({
     entities: input.entities,
     availableMetal: input.availableMetal,
+    availableCash: input.availableCash,
     getDamageState: input.getDamageState,
     queueProduction: (product) => input.queueProduction(product),
     buildDock: () => input.buildDock(),
@@ -101,6 +105,7 @@ export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
     const factoryProduct = !input.state.productionQueued
       ? chooseAiFactoryProduction({
           strategy: input.state.strategy,
+          tactic: input.state.activeTactic,
           entities: input.entities,
           availableMetal: input.availableMetal,
           availableCash: input.availableCash,
@@ -111,6 +116,7 @@ export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
     const barracksProduct = hasBarracks && !input.state.barracksProductionQueued
       ? chooseAiBarracksProduction({
           strategy: input.state.strategy,
+          tactic: input.state.activeTactic,
           entities: input.entities,
           availableMetal: input.availableMetal,
           availableCash: input.availableCash,
@@ -131,6 +137,7 @@ export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
     } else if (!factoryProduct && !barracksProduct && input.state.dockBuilt && !input.state.boatProductionQueued) {
       const dockProduct = chooseAiDockProduction({
         strategy: input.state.strategy,
+        tactic: input.state.activeTactic,
         entities: input.entities,
         availableMetal: input.availableMetal,
         availableCash: input.availableCash,

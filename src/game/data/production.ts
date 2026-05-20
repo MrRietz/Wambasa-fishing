@@ -11,18 +11,20 @@ export interface ProductionDefinition {
 }
 
 export const productionCatalog: Record<ProductionKind, ProductionDefinition> = {
-  worker: { label: 'Worker', cost: 60, seconds: 3.6, crewCost: 1 },
-  guard: { label: 'Guard', cost: 90, cashCost: 15, seconds: 4.2, crewCost: 1 },
+  worker: { label: 'Worker', cost: 0, cashCost: 45, seconds: 3.6, crewCost: 1 },
+  guard: { label: 'Guard', cost: 90, cashCost: 30, seconds: 4.2, crewCost: 1 },
   saboteur: { label: 'Saboteur', cost: 110, cashCost: 25, seconds: 4.8, crewCost: 1 },
-  truck: { label: 'Metal Hauler', cost: 130, seconds: 5.2, crewCost: 2 },
+  truck: { label: 'Metal Hauler', cost: 105, cashCost: 45, seconds: 5.2, crewCost: 2 },
   boat: { label: 'Fishing Boat', cost: 100, cashCost: 25, seconds: 5.8, crewCost: 2 },
   attackBoat: { label: 'Attack Boat', cost: 135, cashCost: 50, seconds: 6.6, crewCost: 3 },
 };
 
 export function formatProductionCost(definition: ProductionDefinition): string {
-  const baseCost = definition.cashCost && definition.cashCost > 0
-    ? `${definition.cost} metal + ${definition.cashCost} cash`
-    : `${definition.cost} metal`;
+  const costs = [
+    definition.cost > 0 ? `${definition.cost} metal` : '',
+    definition.cashCost && definition.cashCost > 0 ? `${definition.cashCost} cash` : '',
+  ].filter(Boolean);
+  const baseCost = costs.length > 0 ? costs.join(' + ') : 'free';
   return definition.crewCost && definition.crewCost > 0 ? `${baseCost} + ${definition.crewCost} crew` : baseCost;
 }
 

@@ -392,7 +392,7 @@ test.describe('Epic 1 RTS foundation', () => {
 
     const factory = await worldToScreen(page, 767, 825);
     await page.mouse.click(factory.x, factory.y);
-    await expect(page.locator('#command-hint')).toContainText('Workers and Trucks cost metal only');
+    await expect(page.locator('#command-hint')).toContainText('Workers cost 45 cash. Trucks cost 105 metal + 45 cash.');
     await expect(page.locator('#selection-readout')).toContainText('Guards/Saboteurs: metal + cash');
 
     const dock = await worldToScreen(page, 1370, 468);
@@ -667,7 +667,7 @@ test.describe('Epic 3 land economy foundation', () => {
     expect(state.entities.find((entity) => entity.id === 'player-factory')).toEqual(
       expect.objectContaining({
         kind: 'factory',
-        health: 1200,
+        health: 1500,
         dropOff: ['metal'],
         productionQueue: [],
       }),
@@ -759,15 +759,15 @@ test.describe('Epic 3 land economy foundation', () => {
 
     await expect(page.locator('#factory-command-panel')).toBeVisible();
     await expect(page.getByText('Factory Orders')).toBeVisible();
-    await page.getByRole('button', { name: 'Build Worker - 60 metal' }).click();
+    await page.getByRole('button', { name: 'Build Worker - 45 cash' }).click();
 
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 220 | Cash: 100 | Crew: 6/6');
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 320 | Cash: 75 | Crew: 6/6');
     await expect(page.locator('#production-readout')).toContainText('Worker');
     let state = await getDebugState(page);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: true, kind: 'produce', product: 'worker' }));
-    expect(state.lastProductionEvent).toEqual(expect.objectContaining({ kind: 'queued', product: 'worker', stockpile: 220 }));
+    expect(state.lastProductionEvent).toEqual(expect.objectContaining({ kind: 'queued', product: 'worker', stockpile: 320 }));
     expect(state.entities.find((entity) => entity.id === 'player-factory')?.productionQueue?.[0]).toEqual(
-      expect.objectContaining({ product: 'worker', cost: 60 }),
+      expect.objectContaining({ product: 'worker', cost: 0, cashCost: 45 }),
     );
     expect(state.entities.find((entity) => entity.id === 'player-factory')?.renderPolish).toEqual(
       expect.objectContaining({ hasProductionActivity: true }),
@@ -786,10 +786,10 @@ test.describe('Epic 3 land economy foundation', () => {
     const barracks = await worldToScreen(page, PLAYER_BARRACKS.x, PLAYER_BARRACKS.y);
     await page.mouse.click(barracks.x, barracks.y);
 
-    await expect(page.getByRole('button', { name: 'Build Guard - 90 metal + 15 cash' })).toBeVisible();
-    await page.getByRole('button', { name: 'Build Guard - 90 metal + 15 cash' }).click();
+    await expect(page.getByRole('button', { name: 'Build Guard - 90 metal + 30 cash' })).toBeVisible();
+    await page.getByRole('button', { name: 'Build Guard - 90 metal + 30 cash' }).click();
 
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 190 | Cash: 85 | Crew: 6/6');
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 230 | Cash: 90 | Crew: 6/6');
     await expect(page.locator('#barracks-production-readout')).toContainText('Guard');
     let state = await getDebugState(page);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: true, kind: 'produce', product: 'guard' }));
@@ -810,9 +810,10 @@ test.describe('Epic 3 land economy foundation', () => {
     const factory = await worldToScreen(page, 767, 825);
     await page.mouse.click(factory.x, factory.y);
 
-    await page.getByRole('button', { name: 'Build Truck - 130 metal' }).click();
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 150 | Cash: 100 | Crew: 6/6');
-    await expect(page.getByRole('button', { name: 'Build Truck - 130 metal' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Build Truck - 105 metal + 45 cash' }).click();
+    await page.getByRole('button', { name: 'Build Truck - 105 metal + 45 cash' }).click();
+    await expect(page.locator('#economy-readout')).toHaveText('Metal: 110 | Cash: 30 | Crew: 6/6');
+    await expect(page.getByRole('button', { name: 'Build Truck - Need 15 cash' })).toBeDisabled();
 
     await page.evaluate(() => {
       const button = document.querySelector<HTMLButtonElement>('#produce-truck-button');
@@ -823,8 +824,8 @@ test.describe('Epic 3 land economy foundation', () => {
     });
 
     const state = await getDebugState(page);
-    expect(page.getByRole('button', { name: 'Build Truck - 130 metal' })).toBeDisabled();
-    expect(state.resources.metal).toBe(100);
+    expect(page.getByRole('button', { name: 'Build Truck - Need 15 cash' })).toBeDisabled();
+    expect(state.resources.metal).toBe(110);
   });
 });
 
@@ -1125,8 +1126,8 @@ test.describe('Epic 4 worker building placement foundation', () => {
     expect(damaged).toBe(true);
 
     let state = await getDebugState(page);
-    const damagedHealth = state.entities.find((entity) => entity.id === 'player-factory')?.health ?? 1200;
-    expect(damagedHealth).toBeLessThan(1200);
+    const damagedHealth = state.entities.find((entity) => entity.id === 'player-factory')?.health ?? 1500;
+    expect(damagedHealth).toBeLessThan(1500);
     expect(state.entities.find((entity) => entity.id === 'player-factory')?.renderPolish).toEqual(
       expect.objectContaining({ hasDamageSmoke: true }),
     );
@@ -1901,7 +1902,7 @@ test.describe('Epic 6 AI rival foundation', () => {
     let state = await getDebugState(page);
     expect(state.entities.find((entity) => entity.id === 'enemy-factory')?.productionQueue).toEqual(
       expect.arrayContaining([
-      expect.objectContaining({ product: 'worker', cost: 60 }),
+      expect.objectContaining({ product: 'worker', cost: 0, cashCost: 45 }),
       ]),
     );
 
@@ -2069,7 +2070,7 @@ test.describe('Epic 6 AI rival foundation', () => {
     await page.goto('/');
     const barracks = await worldToScreen(page, PLAYER_BARRACKS.x, PLAYER_BARRACKS.y);
     await page.mouse.click(barracks.x, barracks.y);
-    await page.getByRole('button', { name: 'Build Guard - 90 metal + 15 cash' }).click();
+    await page.getByRole('button', { name: 'Build Guard - 90 metal + 30 cash' }).click();
     await page.getByRole('button', { name: 'Build Saboteur - 110 metal + 25 cash' }).click();
     await expect(page.locator('#economy-readout')).toHaveText('Metal: 80 | Cash: 60 | Crew: 6/6');
 

@@ -430,6 +430,14 @@ function drawBuildingAnimation(
     graphic.circle(left + width - 38, top + 28, 7 + (polish.activityPhase % 2) * 3).fill({ color: 0xffd166, alpha: 0.48 });
     graphic.rect(left + 28, top + height - 28, (width - 56) * (1 - polish.activityPhase / 6), 5).fill({ color: 0x87e0a5, alpha: 0.38 });
   }
+  if (polish.hasReelWorkshopActivity) {
+    const progress = polish.reelWorkshopProgress ?? 0;
+    const pulse = 0.48 + (polish.activityPhase % 3) * 0.08;
+    graphic.roundRect(left + width * 0.12, top + height * 0.62, width * 0.76, 12, 6).fill({ color: 0x160f0d, alpha: 0.66 });
+    graphic.roundRect(left + width * 0.12, top + height * 0.62, Math.max(14, width * 0.76 * progress), 12, 6).fill({ color: 0x87e0ff, alpha: 0.72 });
+    graphic.circle(left + width * 0.72, top + height * 0.36, 7 + (polish.activityPhase % 3) * 2).fill({ color: 0x8fd8ff, alpha: pulse });
+    graphic.circle(left + width * 0.78, top + height * 0.32, 4 + (polish.activityPhase % 2) * 2).fill({ color: 0xfff1a8, alpha: 0.46 });
+  }
   if (entity.animation.state === 'attack') {
     graphic.circle(left + width * 0.5, top - 22, 11 + (frame % 4) * 2).stroke({ color: 0xffd166, width: 4, alpha: 0.74 });
     graphic.circle(left + width * 0.5, top - 22, 22 + (frame % 4) * 5).stroke({ color: 0xff6d4a, width: 2, alpha: 0.22 });

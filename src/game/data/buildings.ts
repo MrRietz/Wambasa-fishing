@@ -17,5 +17,5 @@ export const buildingCatalog: Record<BuildingPlanKind, BuildingPlanDefinition> =
   guardTower: { label: 'Guard Tower foundation', width: 96, height: 96, cost: 150, seconds: 7.5, capacityBonus: 0, health: 520, tint: 0x6f7f68 },
   techLab: { label: 'Tech Lab foundation', width: 154, height: 116, cost: 190, seconds: 9.5, capacityBonus: 0, health: 640, tint: 0x4f7f86 },
   barracks: { label: 'Barracks foundation', width: 168, height: 120, cost: 180, seconds: 8.5, capacityBonus: 0, health: 700, tint: 0x8b6d4f },
-  factory: { label: 'Command Center foundation', width: 315, height: 210, cost: 320, seconds: 12, capacityBonus: 0, health: 1200, tint: 0x4f8fc5 },
+  factory: { label: 'Command Center foundation', width: 315, height: 210, cost: 420, seconds: 22, capacityBonus: 0, health: 1500, tint: 0x4f8fc5 },
 };

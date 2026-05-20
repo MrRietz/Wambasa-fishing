@@ -998,6 +998,17 @@ button {
   line-height: 1.25;
 }
 
+.rts-production-readout[data-state="producing"] {
+  border-color: rgba(135, 224, 255, 0.58);
+  background: rgba(17, 47, 58, 0.56);
+  color: #e9fbff;
+}
+
+.rts-production-readout[data-state="idle"] {
+  border-color: rgba(246, 212, 138, 0.34);
+  color: #f3e0ae;
+}
+
 .rts-queue-readout {
   display: flex;
   flex-wrap: wrap;

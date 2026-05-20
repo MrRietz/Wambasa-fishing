@@ -4,6 +4,8 @@ import type { BlockerKind, FishSpecies, TerrainDecorationKind } from '../map/map
 import { getUnitAnimationFrameCount, isHumanoidAnimationUnit, unitAnimationManifest, type HumanoidUnitKind } from './unitAnimationManifest';
 
 const textures = new Map<string, Texture>();
+const STARTUP_TEXTURE_CONCURRENCY = 8;
+const DEFERRED_TEXTURE_CONCURRENCY = 6;
 type VehicleSpriteKind = 'truck' | 'boat';
 type BuildingSpriteKind = 'factory' | 'dock' | 'house' | 'guardTower' | 'techLab' | 'barracks';
 export type EffectSpriteKind = 'constructionDust' | 'repairSparks' | 'harvestSparks' | 'fishSplash' | 'cannonMuzzleFlash' | 'sabotageBurst' | 'smokePlume';
@@ -144,19 +146,23 @@ const buildingSpritePaths: Record<BuildingSpriteKind, Record<'healthy' | 'damage
   },
 };
 
-export async function loadUnitSpriteTextures(): Promise<void> {
-  const paths = listUnitSpritePaths();
+export interface UnitSpriteTextureLoadResult {
+  startupPathCount: number;
+  deferredPathCount: number;
+  deferred: Promise<void>;
+}
+
+export async function loadUnitSpriteTextures(): Promise<UnitSpriteTextureLoadResult> {
+  const startupPaths = listStartupSpritePaths();
+  const deferredPaths = listUnitSpritePaths().filter((path) => !startupPaths.includes(path));
   textures.clear();
-  for (const path of paths) {
-    try {
-      const texture = await Assets.load<Texture>(resolvePublicAssetPath(path));
-      textures.set(path, texture);
-    } catch (error) {
-      if (!optionalSpritePaths.has(path)) {
-        throw error;
-      }
-    }
-  }
+  await loadTexturePaths(startupPaths, STARTUP_TEXTURE_CONCURRENCY);
+  const deferred = loadTexturePaths(deferredPaths, DEFERRED_TEXTURE_CONCURRENCY);
+  return {
+    startupPathCount: startupPaths.length,
+    deferredPathCount: deferredPaths.length,
+    deferred,
+  };
 }
 
 export function getUnitSpriteTexture(kind: EntityKind, action: AnimationAction, direction: AnimationDirection, frame: number): Texture | undefined {
@@ -267,7 +273,7 @@ export function listUnitSpritePaths(): string[] {
     ),
   );
   const buildingPaths = Object.values(buildingSpritePaths).flatMap((variants) => Object.values(variants));
-  return [
+  return uniquePaths([
     ...humanoidPaths,
     ...vehiclePaths,
     ...buildingPaths,
@@ -279,7 +285,61 @@ export function listUnitSpritePaths(): string[] {
     fishingZoneMarkerPath,
     metalFieldPath,
     ...Object.values(fishSchoolPaths).flat(),
-  ];
+  ]);
+}
+
+function listStartupSpritePaths(): string[] {
+  const workerPaths = ['idle', 'move'].flatMap((action) =>
+    unitAnimationManifest.directions.flatMap((direction) =>
+      Array.from({ length: getUnitAnimationFrameCount('worker', action as AnimationAction) ?? 0 }, (_, frame) =>
+        getUnitSpritePath('worker', action as AnimationAction, direction, frame),
+      ),
+    ),
+  );
+  const truckPaths = ['move', 'harvest', 'unload'].flatMap((action) =>
+    getVehicleSpriteDirections('truck').flatMap((direction) =>
+      Array.from({ length: vehicleSpriteDefinitions.truck[action as AnimationAction]?.frameCount ?? 0 }, (_, frame) =>
+        getVehicleSpritePath('truck', action as AnimationAction, direction, frame),
+      ),
+    ),
+  );
+
+  return uniquePaths([
+    ...Object.values(terrainPlatePaths),
+    buildingSpritePaths.factory.healthy,
+    ...workerPaths,
+    ...truckPaths,
+    fishingZoneMarkerPath,
+    metalFieldPath,
+    ...Object.values(fishSchoolPaths).map((frames) => frames[0]),
+  ]);
+}
+
+async function loadTexturePaths(paths: string[], concurrency: number): Promise<void> {
+  const queue = [...paths];
+  const workerCount = Math.max(1, Math.min(concurrency, queue.length));
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (queue.length > 0) {
+        const path = queue.shift();
+        if (!path || textures.has(path)) {
+          continue;
+        }
+        try {
+          const texture = await Assets.load<Texture>(resolvePublicAssetPath(path));
+          textures.set(path, texture);
+        } catch (error) {
+          if (!optionalSpritePaths.has(path)) {
+            throw error;
+          }
+        }
+      }
+    }),
+  );
+}
+
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths.filter(Boolean))];
 }
 
 function getUnitSpritePath(kind: HumanoidUnitKind, action: AnimationAction, direction: CardinalAnimationDirection, frame: number): string {

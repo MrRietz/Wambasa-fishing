@@ -18,6 +18,8 @@ export interface FishingSystemOutput {
   events: FishingSystemEvent[];
 }
 
+const BOAT_FISH_LOAD_PER_SECOND = 10;
+
 export function updateFishingSystem(input: FishingSystemInput): FishingSystemOutput {
   let changed = false;
   const events: FishingSystemEvent[] = [];
@@ -49,7 +51,7 @@ export function updateFishingSystem(input: FishingSystemInput): FishingSystemOut
       continue;
     }
 
-    const loaded = Math.min(cargo.capacity - cargo.amount, zone.amount, Math.max(1, Math.round(16 * input.deltaSeconds)));
+    const loaded = Math.min(cargo.capacity - cargo.amount, zone.amount, Math.max(1, Math.round(BOAT_FISH_LOAD_PER_SECOND * input.deltaSeconds)));
     cargo.amount += loaded;
     zone.amount = Math.max(0, zone.amount - loaded);
     if (zone.amount <= 0) {

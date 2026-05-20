@@ -1,6 +1,7 @@
 import { Application } from 'pixi.js';
 import { tickAiCoordinator, type AiControllerState, type AiStrategy } from '../game/ai/aiCoordinator';
 import type { AiDefenseState } from '../game/ai/aiDefenseSystem';
+import { createAiIntelState, getAiTacticLabel } from '../game/ai/aiIntelSystem';
 import { chooseAiRaidAttacker } from '../game/ai/aiPressureSystem';
 import { AudioManager, syncAudioControls, type SfxCue } from '../game/audio/audioManager';
 import { loadUnitSpriteTextures } from '../game/art/unitSpriteAssets';
@@ -116,6 +117,8 @@ function pickInitialAiStrategy(): AiStrategy {
 
 const aiController: AiControllerState = {
   strategy: pickInitialAiStrategy(),
+  activeTactic: undefined,
+  intel: undefined,
   startDelaySeconds: FIRST_SKIRMISH_BALANCE.aiStartDelaySeconds,
   raidDelaySeconds: FIRST_SKIRMISH_BALANCE.aiFirstRaidGraceSeconds,
   territoryAlertCooldownSeconds: 0,
@@ -135,6 +138,8 @@ const aiController: AiControllerState = {
   lastDefenseEvent: undefined as RtsDebugState['ai']['lastDefenseEvent'],
   raidCount: 0,
 };
+aiController.intel = createAiIntelState(aiController.strategy);
+aiController.activeTactic = aiController.intel.tactic;
 aiController.lastAction =
   aiController.strategy === 'economicBoom'
     ? 'Rival initialized with economic boom plan.'
@@ -377,6 +382,16 @@ function issuePlayerAssetWarning(target: GameEntity, phase: 'incoming' | 'damage
         : `Warning: ${target.name} is taking damage.`;
   pushMinimapAttackPing(target.x, target.y, phase === 'destroyed' ? 'error' : 'warning');
   setBootStatusWithFocus('ready', message, { x: target.x, y: target.y });
+  playSfx('warning');
+}
+
+function issueRivalScoutWarning(message: string, focusWorld: { x: number; y: number }): void {
+  const key = `scout:${message}`;
+  if (!shouldEmitRateLimitedWarning(key, 16)) {
+    return;
+  }
+  pushMinimapAttackPing(focusWorld.x, focusWorld.y, 'warning');
+  setBootStatusWithFocus('ready', message, focusWorld);
   playSfx('warning');
 }
 
@@ -737,6 +752,11 @@ function getAiDebugState(): RtsDebugState['ai'] {
     unitIds: enemyUnits.map((entity) => entity.id),
     commandCenterId: enemyUnits.find((entity) => entity.kind === 'enemyFactory')?.id,
     lastAction: aiController.lastAction,
+    tactic: aiController.activeTactic,
+    tacticLabel: aiController.activeTactic ? getAiTacticLabel(aiController.activeTactic) : undefined,
+    tacticReason: aiController.intel?.tacticReason,
+    lastScoutReport: aiController.intel?.lastScoutReport,
+    observedPlayer: aiController.intel?.observed,
     lastProductionEvent: aiController.lastProductionEvent,
     lastResourceEvent: aiController.lastResourceEvent,
     lastRaidEvent: aiController.lastRaidEvent,
@@ -787,7 +807,7 @@ function getLandMobileEntities(): GameEntity[] {
 }
 
 function getMaxHealth(entity: GameEntity): number {
-  if (entity.kind === 'factory') return 1200;
+  if (entity.kind === 'factory') return buildingCatalog.factory.health;
   if (entity.kind === 'enemyFactory') return 900;
   if (entity.kind === 'dock') return entity.faction === 'player' ? 800 : buildingCatalog.dock.health;
   if (entity.kind === 'house') return entity.faction === 'enemy' ? 90 : buildingCatalog.house.health;
@@ -1439,15 +1459,15 @@ function getWorkerFishingCadence(): {
   reelCatchAmount: { min: number; max: number };
 } {
   const reelLevel = getFactionUpgradeLevel('player', 'reels');
-  const reelDelayReduction = Math.min(0.28, reelLevel * 0.08);
+  const reelDelayReduction = Math.min(0.18, reelLevel * 0.05);
   return {
     baseCatchDelaySeconds: { min: 0.95, max: 1.7 },
     reelCatchDelaySeconds: {
-      min: Math.max(0.42, 0.6 - reelDelayReduction),
-      max: Math.max(0.8, 1.1 - reelDelayReduction),
+      min: Math.max(0.55, 0.75 - reelDelayReduction),
+      max: Math.max(0.95, 1.25 - reelDelayReduction),
     },
     baseCatchChance: 0.78,
-    reelCatchChance: Math.min(0.95, 0.9 + reelLevel * 0.02),
+    reelCatchChance: Math.min(0.93, 0.86 + reelLevel * 0.015),
     baseCatchAmount: { min: 2, max: 3 },
     reelCatchAmount: {
       min: 3,
@@ -1457,7 +1477,7 @@ function getWorkerFishingCadence(): {
 }
 
 function getFactoryReelBuildSeconds(): number {
-  return 7.5;
+  return 11;
 }
 
 function getBoatSpeed(entity: GameEntity): number {
@@ -2854,6 +2874,7 @@ const aiRuntime = createAiRuntime({
   updateAiRaidActive: (deltaSeconds, layers) => combatRuntime.updateAiRaidActive(deltaSeconds, layers),
   updateEnemyAutoDefense: (layers) => combatRuntime.updateEnemyAutoDefense(layers),
   issuePlayerAssetWarning,
+  announceAiScout: issueRivalScoutWarning,
   findReachableRaidPlan,
   getAiRaidTargetPriority,
   getAiRaidSquad,
@@ -3092,12 +3113,15 @@ function getRaidCandidateTargets(priority?: Array<GameEntity['kind']>): GameEnti
           entity.kind === 'boat' ||
           entity.kind === 'dock' ||
           entity.kind === 'barracks' ||
+          entity.kind === 'guardTower' ||
           entity.kind === 'factory'
         ),
     )
     .map((entity) => ({
       entity,
-      score: priority ? Math.max(0, priority.indexOf(entity.kind)) : entity.kind === 'truck' ? 0 : entity.kind === 'boat' ? 1 : entity.kind === 'dock' ? 2 : entity.kind === 'barracks' ? 3 : 4,
+      score: priority
+        ? priority.includes(entity.kind) ? priority.indexOf(entity.kind) : 999
+        : entity.kind === 'truck' ? 0 : entity.kind === 'boat' ? 1 : entity.kind === 'dock' ? 2 : entity.kind === 'barracks' ? 3 : entity.kind === 'guardTower' ? 4 : 5,
     }))
     .sort((a, b) => a.score - b.score)
     .map((entry) => entry.entity);
@@ -3153,30 +3177,36 @@ function findReachableRaidPlan(attacker: GameEntity, priority?: Array<GameEntity
 
 function getAiRaidTargetPriority(): Array<GameEntity['kind']> {
   const cycle = aiController.raidCount % 2;
-  if (aiController.strategy === 'economicBoom') {
+  if (aiController.activeTactic === 'probeEconomy') {
     return cycle === 0 ? ['truck', 'factory', 'dock', 'boat', 'barracks'] : ['factory', 'truck', 'dock', 'boat', 'barracks'];
   }
-  if (aiController.strategy === 'harborPressure') {
+  if (aiController.activeTactic === 'harborControl') {
     return cycle === 0 ? ['dock', 'boat', 'truck', 'factory', 'barracks'] : ['boat', 'dock', 'factory', 'truck', 'barracks'];
+  }
+  if (aiController.activeTactic === 'counterMilitary') {
+    return cycle === 0 ? ['guardTower', 'barracks', 'guard', 'dock', 'factory'] : ['barracks', 'guardTower', 'factory', 'dock', 'boat'];
   }
   return cycle === 0 ? ['factory', 'barracks', 'dock', 'truck', 'boat'] : ['barracks', 'factory', 'truck', 'dock', 'boat'];
 }
 
 function describeAiRaidTactic(): string {
-  if (aiController.strategy === 'economicBoom') {
+  if (aiController.activeTactic === 'probeEconomy') {
     return aiController.raidCount % 2 === 0 ? 'economic harassment' : 'timing push';
   }
-  if (aiController.strategy === 'harborPressure') {
+  if (aiController.activeTactic === 'harborControl') {
     return aiController.raidCount % 2 === 0 ? 'harbor strike' : 'coastal pressure';
+  }
+  if (aiController.activeTactic === 'counterMilitary') {
+    return aiController.raidCount % 2 === 0 ? 'counter-patrol' : 'defense break';
   }
   return aiController.raidCount % 2 === 0 ? 'siege' : 'base crack';
 }
 
 function getAiRaidSquad(leadAttacker: GameEntity, target: GameEntity): GameEntity[] {
   const baseSize =
-    aiController.strategy === 'siege'
+    aiController.activeTactic === 'baseSiege' || aiController.strategy === 'siege'
       ? 3
-      : aiController.strategy === 'economicBoom'
+      : aiController.activeTactic === 'probeEconomy'
         ? 1
         : 2;
   const desiredSize =
@@ -3217,10 +3247,12 @@ function getStaggeredRaidApproachPoint(target: GameEntity, index: number, count:
 
 function getAiRepeatRaidDelaySeconds(): number {
   const strategyAdjustment =
-    aiController.strategy === 'harborPressure'
+    aiController.activeTactic === 'harborControl'
       ? -4
-      : aiController.strategy === 'economicBoom'
+      : aiController.activeTactic === 'probeEconomy'
         ? 4
+        : aiController.activeTactic === 'counterMilitary'
+          ? 2
         : 0;
   if (playerSettings.difficulty === 'hard') {
     return Math.max(10, FIRST_SKIRMISH_BALANCE.aiRepeatRaidDelaySeconds - 6 + strategyAdjustment);
@@ -4846,11 +4878,19 @@ export async function createWambasaRtsApp(): Promise<void> {
     gameElement.appendChild(app.canvas);
     focusGameViewport();
 
-    setBootStatus('loading', 'Loading runtime unit sprite frames...');
-    await loadUnitSpriteTextures();
+    setBootStatus('loading', 'Loading core runtime sprite frames...');
+    const spriteTextures = await loadUnitSpriteTextures();
     const layers = createRenderLayers();
     initializeWorldOverlays(layers, mapData);
     renderMap(layers);
+    void spriteTextures.deferred
+      .then(() => {
+        renderMap(layers);
+        updateFogOfWar(layers);
+      })
+      .catch((error) => {
+        console.warn('Deferred sprite texture loading failed.', error);
+      });
     updateFogOfWar(layers);
     app.stage.addChild(layers.world);
     installDebugTestHooks(layers);

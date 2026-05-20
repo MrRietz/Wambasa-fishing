@@ -20,6 +20,7 @@ import type { FishingZoneState } from '../map/mapTypes';
 import type { RenderPolishState } from '../render/renderPolishState';
 import { getRenderPolishState } from '../render/renderPolishState';
 import type { PlayerSettings } from '../settings/playerSettings';
+import type { AiObservedPlayerState, AiTactic } from '../ai/aiIntelSystem';
 
 export type AlertSeverity = 'info' | 'success' | 'warning' | 'error';
 export type ObjectiveId = 'select' | 'harvest' | 'dock' | 'boat' | 'fish' | 'defense' | 'win';
@@ -152,6 +153,11 @@ export interface RtsDebugState {
     unitIds: string[];
     commandCenterId?: string;
     lastAction?: string;
+    tactic?: AiTactic;
+    tacticLabel?: string;
+    tacticReason?: string;
+    lastScoutReport?: string;
+    observedPlayer?: AiObservedPlayerState;
     lastProductionEvent?: {
       kind: 'queued' | 'spawned';
       product: ProductionKind;

@@ -1,9 +1,11 @@
 import { productionCatalog, type ProductionKind } from '../data/production';
 import type { DamageState, GameEntity } from '../entities/components';
 import type { AiStrategy } from './aiCoordinator';
+import type { AiTactic } from './aiIntelSystem';
 
 export interface AiFactoryPressureInput {
   strategy: AiStrategy;
+  tactic?: AiTactic;
   entities: GameEntity[];
   availableMetal: number;
   availableCash: number;
@@ -22,7 +24,14 @@ export function chooseAiFactoryProduction(input: AiFactoryPressureInput): Exclud
   const enemyWorkers = aliveEnemyUnits.filter((entity) => entity.kind === 'worker').length;
   const enemyTrucks = aliveEnemyUnits.filter((entity) => entity.kind === 'truck').length;
   const priorities: Array<Exclude<ProductionKind, 'boat' | 'attackBoat' | 'guard' | 'saboteur'>> = [];
-  if (input.strategy === 'economicBoom') {
+  if (input.tactic === 'probeEconomy') {
+    if (enemyWorkers < 4) priorities.push('worker');
+    if (enemyTrucks < 3) priorities.push('truck');
+    if (enemyWorkers < 5) priorities.push('worker');
+  } else if (input.tactic === 'baseSiege') {
+    if (enemyTrucks < 2) priorities.push('truck');
+    if (enemyWorkers < 3) priorities.push('worker');
+  } else if (input.strategy === 'economicBoom') {
     if (enemyWorkers < 3) priorities.push('worker');
     if (enemyTrucks < 2) priorities.push('truck');
     if (enemyWorkers < 4) priorities.push('worker');
@@ -69,7 +78,19 @@ export function chooseAiBarracksProduction(input: AiFactoryPressureInput): Extra
   ).length;
 
   const priorities: Array<Extract<ProductionKind, 'guard' | 'saboteur'>> = [];
-  if (input.strategy === 'economicBoom') {
+  if (input.tactic === 'counterMilitary') {
+    if (enemyGuards < 5) priorities.push('guard', 'guard');
+    if (enemySaboteurs < 1 && enemyGuards >= 3) priorities.push('saboteur');
+    if (enemyGuards < 7) priorities.push('guard');
+  } else if (input.tactic === 'baseSiege') {
+    if (enemyGuards < 4) priorities.push('guard', 'guard');
+    if (enemyGuards >= 2 && enemySaboteurs < 2) priorities.push('saboteur');
+    if (enemyGuards < 7) priorities.push('guard');
+  } else if (input.tactic === 'harborControl') {
+    if (enemyGuards < 3) priorities.push('guard');
+    if (playerEconomyTargets >= 2 && enemySaboteurs < 1) priorities.push('saboteur');
+    if (enemyGuards < 5) priorities.push('guard');
+  } else if (input.strategy === 'economicBoom') {
     if (enemyGuards < 2) priorities.push('guard');
     if (playerCombatPressure >= 2 && enemyGuards < 4) priorities.push('guard');
     if (enemyWorkers >= 3 && enemyGuards >= 3 && enemySaboteurs < 1) priorities.push('saboteur');
@@ -114,7 +135,15 @@ export function chooseAiDockProduction(input: AiFactoryPressureInput): Extract<P
   ).length;
 
   const priorities: Array<Extract<ProductionKind, 'boat' | 'attackBoat'>> = [];
-  if (input.strategy === 'economicBoom') {
+  if (input.tactic === 'harborControl') {
+    if (enemyFishingBoats < 1) priorities.push('boat');
+    if (enemyAttackBoats < Math.max(1, playerBoats)) priorities.push('attackBoat');
+    if (enemyFishingBoats < 2) priorities.push('boat');
+    if (playerDockOrFactory > 0 && enemyAttackBoats < 2) priorities.push('attackBoat');
+  } else if (input.tactic === 'counterMilitary') {
+    if (playerBoats > 0 && enemyAttackBoats < Math.max(1, Math.ceil(playerBoats / 2))) priorities.push('attackBoat');
+    if (enemyFishingBoats < 1) priorities.push('boat');
+  } else if (input.strategy === 'economicBoom') {
     if (enemyFishingBoats < 2) priorities.push('boat', 'boat');
     if (enemyFishingBoats < 3) priorities.push('boat');
     if (playerBoats > 1 && enemyAttackBoats < 1) priorities.push('attackBoat');

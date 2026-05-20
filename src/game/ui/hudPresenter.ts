@@ -1,4 +1,5 @@
 import { buildingCatalog } from '../data/buildings';
+import { formatProductionCost, productionCatalog } from '../data/production';
 import type { AlertSeverity, RtsDebugState } from '../debug/debugState';
 import type { DamageState, GameEntity, MatchOutcome, MatchState, MatchStats, PlacementMode } from '../entities/components';
 import type { FishingZoneData } from '../map/mapTypes';
@@ -131,7 +132,7 @@ export function buildHudPresentation(input: HudPresentationInput): HudPresentati
 
   if (hasFactory) {
     return {
-      commandHint: '',
+      commandHint: `Assign workers to factory crew to produce reels. Sell stored reels or enable auto-sell for cash. Workers cost ${formatProductionCost(productionCatalog.worker)}; trucks cost ${formatProductionCost(productionCatalog.truck)}.`,
       viewportMode: 'Factory selected',
       viewportHotkeys: DEFAULT_HOTKEYS,
     };
@@ -139,7 +140,7 @@ export function buildHudPresentation(input: HudPresentationInput): HudPresentati
 
   if (hasBarracks) {
     return {
-      commandHint: '',
+      commandHint: `Guards cost ${formatProductionCost(productionCatalog.guard)}. Saboteurs cost ${formatProductionCost(productionCatalog.saboteur)}.`,
       viewportMode: 'Barracks selected',
       viewportHotkeys: DEFAULT_HOTKEYS,
     };

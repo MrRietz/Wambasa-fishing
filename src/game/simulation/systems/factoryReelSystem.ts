@@ -19,7 +19,7 @@ export interface FactoryReelSystemOutput {
   events: FactoryReelEvent[];
 }
 
-export const REEL_BUILD_SECONDS = 7.5;
+export const REEL_BUILD_SECONDS = 11;
 export const REEL_SELL_VALUE = 18;
 const FACTORY_CREW_EFFICIENCY_STEP = 0.45;
 const CNC_EFFICIENCY_STEP = 0.15;

@@ -5,6 +5,7 @@ import type { DamageState, GameEntity } from '../entities/components';
 export interface AiRebuildInput {
   entities: GameEntity[];
   availableMetal: number;
+  availableCash: number;
   getDamageState: (entity: GameEntity) => DamageState | undefined;
   queueProduction: (product: ProductionKind) => boolean;
   buildDock: () => boolean;
@@ -23,13 +24,13 @@ export function updateAiEconomyRebuildSystem(input: AiRebuildInput): boolean {
   }
 
   const activeWorkers = countActive(input, 'worker');
-  if (activeWorkers < 1 && !hasEnemyQueuedProduct(input.entities, 'worker') && input.availableMetal >= productionCatalog.worker.cost) {
+  if (activeWorkers < 1 && !hasEnemyQueuedProduct(input.entities, 'worker') && canAffordProduction(input, 'worker')) {
     input.onRebuildAction('Rival rebuilding worker.');
     return input.queueProduction('worker');
   }
 
   const activeTrucks = countActive(input, 'truck');
-  if (activeTrucks < 1 && !hasEnemyQueuedProduct(input.entities, 'truck') && input.availableMetal >= productionCatalog.truck.cost) {
+  if (activeTrucks < 1 && !hasEnemyQueuedProduct(input.entities, 'truck') && canAffordProduction(input, 'truck')) {
     input.onResetHarvest();
     input.onRebuildAction('Rival rebuilding metal hauler.');
     return input.queueProduction('truck');
@@ -58,7 +59,7 @@ export function updateAiEconomyRebuildSystem(input: AiRebuildInput): boolean {
     enemyBoats.length > 0 &&
     activeBoats < 1 &&
     !hasEnemyQueuedProduct(input.entities, 'boat') &&
-    input.availableMetal >= productionCatalog.boat.cost
+    canAffordProduction(input, 'boat')
   ) {
     input.onResetBoat();
     input.onRebuildAction('Rival rebuilding fishing boat.');
@@ -66,6 +67,11 @@ export function updateAiEconomyRebuildSystem(input: AiRebuildInput): boolean {
   }
 
   return false;
+}
+
+function canAffordProduction(input: Pick<AiRebuildInput, 'availableMetal' | 'availableCash'>, product: ProductionKind): boolean {
+  const definition = productionCatalog[product];
+  return input.availableMetal >= definition.cost && input.availableCash >= (definition.cashCost ?? 0);
 }
 
 function countActive(input: Pick<AiRebuildInput, 'entities' | 'getDamageState'>, kind: GameEntity['kind']): number {

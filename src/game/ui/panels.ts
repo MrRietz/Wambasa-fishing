@@ -7,6 +7,7 @@ import type { AlertSeverity, RtsDebugState } from '../debug/debugState';
 import { describePlacementReason } from '../map/buildPlacement';
 import type { FishingZoneData } from '../map/mapTypes';
 import type { FishingZoneState } from '../map/mapTypes';
+import { REEL_BUILD_SECONDS } from '../simulation/systems/factoryReelSystem';
 import type { RtsDomElements } from './domShell';
 
 export interface RecentAlert {
@@ -179,9 +180,12 @@ export function renderFactoryCommandPanel(
   const workshop = factory?.economy?.reelWorkshop;
   const clampedReleaseCount = assignedCrewCount <= 0 ? 0 : Math.max(1, Math.min(requestedReleaseCount, assignedCrewCount));
   renderProductionQueueReadout(elements.productionElement, queue, 'Factory queue empty');
-  elements.factoryReelReadoutElement.textContent = factory
-    ? `Reels ${workshop?.reelInventory ?? 0} | ${workshop?.autoSell ? 'Auto-sell on' : 'Auto-sell off'} | Crew ${assignedCrewCount}/10`
-    : 'Workshop idle';
+  elements.factoryReelReadoutElement.textContent = getFactoryReelReadout(factory, workshop, assignedCrewCount);
+  elements.factoryReelReadoutElement.dataset.state = !factory
+    ? 'hidden'
+    : assignedCrewCount > 0
+      ? 'producing'
+      : 'idle';
   syncProductionButton(elements.workerButtonElement, 'Worker', productionCatalog.worker, economy, crew);
   syncProductionButton(elements.truckButtonElement, 'Truck', productionCatalog.truck, economy, crew);
   elements.sellReelsButtonElement.innerHTML = `Sell<br><span>${workshop?.reelInventory ?? 0} stored</span>`;
@@ -199,6 +203,23 @@ export function renderFactoryCommandPanel(
   elements.releaseFactoryCrewDecreaseButtonElement.disabled = !factory || assignedCrewCount <= 1 || clampedReleaseCount <= 1;
   elements.releaseFactoryCrewButtonElement.disabled = !factory || assignedCrewCount <= 0;
   elements.releaseFactoryCrewIncreaseButtonElement.disabled = !factory || assignedCrewCount <= 1 || clampedReleaseCount >= assignedCrewCount;
+}
+
+function getFactoryReelReadout(
+  factory: GameEntity | null,
+  workshop: NonNullable<GameEntity['economy']>['reelWorkshop'] | undefined,
+  assignedCrewCount: number,
+): string {
+  if (!factory) {
+    return 'Reel workshop idle';
+  }
+  const stored = workshop?.reelInventory ?? 0;
+  const autosell = workshop?.autoSell ? 'Auto-sell on' : 'Auto-sell off';
+  if (assignedCrewCount <= 0) {
+    return `Reel workshop idle | Assign workers to produce reels | Stored ${stored} | ${autosell}`;
+  }
+  const progress = Math.round(((workshop?.reelProgressSeconds ?? 0) / REEL_BUILD_SECONDS) * 100);
+  return `Producing reels | Next reel ${progress}% | Crew ${assignedCrewCount}/10 | Stored ${stored} | ${autosell}`;
 }
 
 export function renderBarracksCommandPanel(
@@ -286,12 +307,16 @@ export function renderWorkerCommandPanel(
   elements.placeFactoryButtonElement.disabled = !workerSelected || metal < buildingCatalog.factory.cost;
   elements.assignFactoryCrewButtonElement.disabled = !workerSelected || !factoryCrewTarget;
   elements.equipReelButtonElement.disabled = !workerSelected || availableReels <= 0;
-  elements.placeHouseButtonElement.innerHTML = `Build House<br><span>+${buildingCatalog.house.capacityBonus} crew cap</span>`;
+  const houseCostLabel = `${buildingCatalog.house.cost} metal`;
+  const houseReason = metal < buildingCatalog.house.cost ? `Need ${buildingCatalog.house.cost - metal} metal` : houseCostLabel;
+  elements.placeHouseButtonElement.setAttribute('aria-label', `Build House - ${houseReason}`);
+  elements.placeHouseButtonElement.title = `Build House - ${houseReason} | +${buildingCatalog.house.capacityBonus} crew cap`;
+  elements.placeHouseButtonElement.innerHTML = `Build House<br><span>${houseReason}</span>`;
   elements.assignFactoryCrewButtonElement.innerHTML = `Crew<br><span>${factoryCrewTarget ? 'factory ready' : 'right-click factory'}</span>`;
   elements.equipReelButtonElement.innerHTML = `Reel<br><span>${availableReels} available</span>`;
   elements.workerBuildDetailsElement.textContent = workerSelected ? getWorkerBuildDetailsCopy(selectedWorkerCount, availableReels) : '';
   elements.placementElement.textContent = placementMode
-    ? `${buildingCatalog[placementMode.building].label}: ${placementMode.valid ? 'ready' : describePlacementReason(placementMode.reason)}`
+    ? `${buildingCatalog[placementMode.building].label}: ${placementMode.valid ? 'ready' : describePlacementReason(placementMode.reason)} | ${getPlacementDetailsCopy(placementMode.building)}`
     : 'Placement idle';
 }
 

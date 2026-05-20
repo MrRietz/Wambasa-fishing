@@ -25,9 +25,9 @@ export interface WorkerFishingSystemOutput {
 }
 
 const BASE_WORKER_CATCH_DELAY_SECONDS = { min: 0.95, max: 1.7 };
-const REEL_WORKER_CATCH_DELAY_SECONDS = { min: 0.6, max: 1.1 };
+const REEL_WORKER_CATCH_DELAY_SECONDS = { min: 0.75, max: 1.25 };
 const BASE_WORKER_CATCH_CHANCE = 0.78;
-const REEL_WORKER_CATCH_CHANCE = 0.9;
+const REEL_WORKER_CATCH_CHANCE = 0.86;
 const BASE_WORKER_CATCH_AMOUNT = { min: 2, max: 3 };
 const REEL_WORKER_CATCH_AMOUNT = { min: 3, max: 4 };
 
