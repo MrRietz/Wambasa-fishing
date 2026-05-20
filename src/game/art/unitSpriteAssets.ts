@@ -19,6 +19,7 @@ export interface SpriteFacingPresentation {
 }
 const cardinalDirections: CardinalAnimationDirection[] = ['east', 'south', 'west', 'north'];
 const truckSpriteDirections: AnimationDirection[] = ['east', 'southEast', 'south', 'southWest', 'west', 'northWest', 'north', 'northEast'];
+const truckEightDirectionActions = new Set<AnimationAction>(['move', 'harvest', 'unload']);
 const terrainBackdropPath = '/assets/processed/g8-production/terrain-backdrop-v1.png';
 const terrainPlatePaths: Record<TerrainPlateKind, string> = {
   water: '/assets/processed/g9-terrain/terrain-water-plate-v1.png',
@@ -107,7 +108,7 @@ const vehicleSpriteDefinitions: Record<VehicleSpriteKind, Partial<Record<Animati
   },
 };
 const optionalTruckSpritePaths = Object.entries(vehicleSpriteDefinitions.truck).flatMap(([action, animation]) =>
-  truckSpriteDirections
+  getVehicleSpriteDirections('truck', action as AnimationAction)
     .filter((direction) => !cardinalDirections.includes(direction as CardinalAnimationDirection))
     .flatMap((direction) =>
       Array.from({ length: animation?.frameCount ?? 0 }, (_, frame) =>
@@ -119,7 +120,7 @@ for (const path of optionalTruckSpritePaths) {
   optionalSpritePaths.add(path);
 }
 const optionalAttackBoatSpritePaths = Object.entries(vehicleSpriteDefinitions.attackBoat).flatMap(([action, animation]) =>
-  getVehicleSpriteDirections('attackBoat').flatMap((direction) =>
+  getVehicleSpriteDirections('attackBoat', action as AnimationAction).flatMap((direction) =>
     Array.from({ length: animation?.frameCount ?? 0 }, (_, frame) =>
       getVehicleSpritePath('attackBoat', action as AnimationAction, direction, frame),
     ),
@@ -301,7 +302,7 @@ export function listUnitSpritePaths(): string[] {
   );
   const vehiclePaths = Object.entries(vehicleSpriteDefinitions).flatMap(([kind, definition]) =>
     Object.entries(definition).flatMap(([action, animation]) =>
-      getVehicleSpriteDirections(kind as VehicleSpriteKind).flatMap((direction) =>
+      getVehicleSpriteDirections(kind as VehicleSpriteKind, action as AnimationAction).flatMap((direction) =>
         Array.from({ length: animation?.frameCount ?? 0 }, (_, frame) =>
           getVehicleSpritePath(kind as VehicleSpriteKind, action as AnimationAction, direction, frame),
         ),
@@ -333,7 +334,7 @@ function listStartupSpritePaths(): string[] {
     ),
   );
   const truckPaths = ['move', 'harvest', 'unload'].flatMap((action) =>
-    getVehicleSpriteDirections('truck').flatMap((direction) =>
+    getVehicleSpriteDirections('truck', action as AnimationAction).flatMap((direction) =>
       Array.from({ length: vehicleSpriteDefinitions.truck[action as AnimationAction]?.frameCount ?? 0 }, (_, frame) =>
         getVehicleSpritePath('truck', action as AnimationAction, direction, frame),
       ),
@@ -368,7 +369,9 @@ async function loadTexturePaths(paths: string[], concurrency: number, tolerateMi
           if (!tolerateMissing && !optionalSpritePaths.has(path)) {
             throw error;
           }
-          console.warn(`Runtime sprite skipped: ${path}`, error);
+          if (!optionalSpritePaths.has(path)) {
+            console.warn(`Runtime sprite skipped: ${path}`, error);
+          }
         }
       }
     }),
@@ -415,8 +418,8 @@ function resolveHumanoidSpriteAction(kind: HumanoidUnitKind, action: AnimationAc
   return 'idle';
 }
 
-function getVehicleSpriteDirections(kind: VehicleSpriteKind): AnimationDirection[] {
-  return kind === 'truck' ? truckSpriteDirections : cardinalDirections;
+function getVehicleSpriteDirections(kind: VehicleSpriteKind, action?: AnimationAction): AnimationDirection[] {
+  return kind === 'truck' && (!action || truckEightDirectionActions.has(action)) ? truckSpriteDirections : cardinalDirections;
 }
 
 function cardinalizeDirection(direction: AnimationDirection): CardinalAnimationDirection {

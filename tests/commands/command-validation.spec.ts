@@ -16,7 +16,7 @@ import {
 import { tickAiCoordinator, type AiControllerState } from '../../src/game/ai/aiCoordinator';
 import { updateAiDefenseResponse } from '../../src/game/ai/aiDefenseSystem';
 import { createCombatRuntime } from '../../src/app/runtime/combatRuntime';
-import { createAiIntelState, mergeObservedPlayerState, scanPlayerIntel, updateAdaptiveTactic } from '../../src/game/ai/aiIntelSystem';
+import { chooseScoutUnit, createAiIntelState, mergeObservedPlayerState, scanPlayerIntel, updateAdaptiveTactic } from '../../src/game/ai/aiIntelSystem';
 import { chooseAiRaidAttacker, findAiTerritoryThreat } from '../../src/game/ai/aiPressureSystem';
 import { buildingCatalog, type BuildingPlanKind } from '../../src/game/data/buildings';
 import { productionCatalog } from '../../src/game/data/production';
@@ -1032,6 +1032,94 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'AI siege opening builds barracks before dock economy',
+    run: () => {
+      const state = makeAiControllerState({
+        strategy: 'siege',
+        harvestIssued: true,
+        openingComplete: false,
+      });
+      let builtDock = false;
+      let builtBarracks = false;
+      const changed = tickAiCoordinator({
+        deltaSeconds: 0.1,
+        state,
+        entities: [
+          makeEntity({ id: 'enemy-factory', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 1200 } }),
+          makeEntity({ id: 'enemy-worker-1', kind: 'worker', faction: 'enemy' }),
+          makeEntity({ id: 'enemy-worker-2', kind: 'worker', faction: 'enemy' }),
+          makeEntity({ id: 'enemy-worker-3', kind: 'worker', faction: 'enemy' }),
+          makeEntity({ id: 'enemy-truck-1', kind: 'truck', faction: 'enemy' }),
+        ],
+        availableMetal: 320,
+        availableCash: 120,
+        getDamageState: () => 'healthy',
+        tryIssueHarvest: () => false,
+        queueProduction: () => false,
+        buildDock: () => {
+          builtDock = true;
+          return true;
+        },
+        buildBarracks: () => {
+          builtBarracks = true;
+          return true;
+        },
+        updateProduction: () => false,
+        updateFishing: () => false,
+        updateBoatRepair: () => false,
+        respondToThreat: () => false,
+        issueRaid: () => false,
+        updateRaid: () => false,
+      });
+
+      assert.equal(changed, true);
+      assert.equal(builtBarracks, true);
+      assert.equal(builtDock, false);
+    },
+  },
+  {
+    name: 'AI queues barracks guards before economy when both are affordable',
+    run: () => {
+      const state = makeAiControllerState({
+        openingComplete: true,
+        productionQueued: false,
+        barracksProductionQueued: false,
+      });
+      const queued: string[] = [];
+      const changed = tickAiCoordinator({
+        deltaSeconds: 0.1,
+        state,
+        entities: [
+          makeEntity({ id: 'enemy-factory', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 1200 } }),
+          makeEntity({ id: 'enemy-barracks', kind: 'barracks', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 700 } }),
+          makeEntity({ id: 'enemy-worker-1', kind: 'worker', faction: 'enemy' }),
+          makeEntity({ id: 'enemy-worker-2', kind: 'worker', faction: 'enemy' }),
+          makeEntity({ id: 'enemy-worker-3', kind: 'worker', faction: 'enemy' }),
+          makeEntity({ id: 'enemy-truck-1', kind: 'truck', faction: 'enemy' }),
+        ],
+        availableMetal: 240,
+        availableCash: 100,
+        getDamageState: () => 'healthy',
+        tryIssueHarvest: () => false,
+        queueProduction: (product) => {
+          queued.push(product);
+          return true;
+        },
+        buildDock: () => false,
+        buildBarracks: () => false,
+        updateProduction: () => false,
+        updateFishing: () => false,
+        updateBoatRepair: () => false,
+        respondToThreat: () => false,
+        issueRaid: () => false,
+        updateRaid: () => false,
+      });
+
+      assert.equal(changed, true);
+      assert.deepEqual(queued, ['guard']);
+    },
+  },
+  {
     name: 'AI offensive raids wait for guards instead of sending workers',
     run: () => {
       const worker = makeEntity({ id: 'enemy-worker-1', kind: 'worker', faction: 'enemy' });
@@ -1039,6 +1127,19 @@ const tests: TestCase[] = [
 
       assert.equal(chooseAiRaidAttacker([worker], () => 'healthy'), null);
       assert.equal(chooseAiRaidAttacker([worker, guard], () => 'healthy')?.id, 'enemy-guard-1');
+    },
+  },
+  {
+    name: 'AI scouting keeps the first two guards with the army',
+    run: () => {
+      const firstGuard = makeEntity({ id: 'enemy-guard-1', kind: 'guard', faction: 'enemy' });
+      const secondGuard = makeEntity({ id: 'enemy-guard-2', kind: 'guard', faction: 'enemy' });
+      const thirdGuard = makeEntity({ id: 'enemy-guard-3', kind: 'guard', faction: 'enemy' });
+      const saboteur = makeEntity({ id: 'enemy-saboteur-1', kind: 'saboteur', faction: 'enemy' });
+
+      assert.equal(chooseScoutUnit([firstGuard, secondGuard], () => 'healthy'), undefined);
+      assert.equal(chooseScoutUnit([firstGuard, secondGuard, thirdGuard], () => 'healthy')?.id, 'enemy-guard-1');
+      assert.equal(chooseScoutUnit([firstGuard, secondGuard, saboteur], () => 'healthy')?.id, 'enemy-saboteur-1');
     },
   },
   {

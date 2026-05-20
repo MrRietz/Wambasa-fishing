@@ -93,7 +93,7 @@ export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
   });
   changed = rebuildChanged || changed;
 
-  if (!rebuildChanged && !input.state.dockBuilt && input.state.harvestIssued && input.availableMetal >= buildingCatalog.dock.cost) {
+  if (!rebuildChanged && input.state.openingComplete && !input.state.dockBuilt && input.state.harvestIssued && input.availableMetal >= buildingCatalog.dock.cost) {
     changed = input.buildDock() || changed;
   }
 
@@ -102,16 +102,6 @@ export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
   }
 
   if (!rebuildChanged && input.state.openingComplete && !changed) {
-    const factoryProduct = !input.state.productionQueued
-      ? chooseAiFactoryProduction({
-          strategy: input.state.strategy,
-          tactic: input.state.activeTactic,
-          entities: input.entities,
-          availableMetal: input.availableMetal,
-          availableCash: input.availableCash,
-          getDamageState: input.getDamageState,
-        })
-      : null;
     const hasBarracks = input.entities.some((entity) => entity.faction === 'enemy' && entity.kind === 'barracks' && input.getDamageState(entity) !== 'destroyed');
     const barracksProduct = hasBarracks && !input.state.barracksProductionQueued
       ? chooseAiBarracksProduction({
@@ -123,12 +113,21 @@ export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
           getDamageState: input.getDamageState,
         })
       : null;
+    const factoryProduct = !barracksProduct && !input.state.productionQueued
+      ? chooseAiFactoryProduction({
+          strategy: input.state.strategy,
+          tactic: input.state.activeTactic,
+          entities: input.entities,
+          availableMetal: input.availableMetal,
+          availableCash: input.availableCash,
+          getDamageState: input.getDamageState,
+        })
+      : null;
 
-    if (factoryProduct) {
-      changed = input.queueProduction(factoryProduct) || changed;
-    }
     if (barracksProduct) {
       changed = input.queueProduction(barracksProduct) || changed;
+    } else if (factoryProduct) {
+      changed = input.queueProduction(factoryProduct) || changed;
     }
     if (!factoryProduct && !barracksProduct && !hasBarracks && input.availableMetal >= buildingCatalog.barracks.cost) {
       changed = input.buildBarracks() || changed;
@@ -251,21 +250,22 @@ function getAiOpeningPlan(strategy: AiStrategy): AiOpeningStep[] {
       return [
         { item: 'worker', targetCount: 3 },
         { item: 'truck', targetCount: 1 },
+        { item: 'barracks', targetCount: 1 },
+        { item: 'guard', targetCount: 1 },
         { item: 'dock', targetCount: 1 },
         { item: 'boat', targetCount: 1 },
         { item: 'truck', targetCount: 2 },
         { item: 'boat', targetCount: 2 },
-        { item: 'barracks', targetCount: 1 },
-        { item: 'guard', targetCount: 1 },
+        { item: 'guard', targetCount: 2 },
       ];
     case 'harborPressure':
       return [
         { item: 'worker', targetCount: 3 },
         { item: 'truck', targetCount: 1 },
         { item: 'dock', targetCount: 1 },
-        { item: 'boat', targetCount: 1 },
         { item: 'barracks', targetCount: 1 },
         { item: 'guard', targetCount: 1 },
+        { item: 'boat', targetCount: 1 },
         { item: 'attackBoat', targetCount: 1 },
         { item: 'guard', targetCount: 2 },
       ];
@@ -274,10 +274,10 @@ function getAiOpeningPlan(strategy: AiStrategy): AiOpeningStep[] {
       return [
         { item: 'worker', targetCount: 3 },
         { item: 'truck', targetCount: 1 },
-        { item: 'dock', targetCount: 1 },
-        { item: 'boat', targetCount: 1 },
         { item: 'barracks', targetCount: 1 },
         { item: 'guard', targetCount: 2 },
+        { item: 'dock', targetCount: 1 },
+        { item: 'boat', targetCount: 1 },
         { item: 'saboteur', targetCount: 1 },
         { item: 'guard', targetCount: 3 },
       ];

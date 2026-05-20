@@ -534,7 +534,7 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
         attack: {
           targetId: target.id,
           phase: 'to-target',
-          damagePerSecond: attacker.kind === 'guard' ? 24 : 18,
+          damagePerSecond: attacker.kind === 'guard' ? 34 : 18,
           range: attacker.kind === 'guard' ? 90 : 72,
         },
       };
@@ -612,7 +612,7 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
       return changed;
     }
 
-    if (intel.scout.cooldownSeconds > 0 || options.aiController.startDelaySeconds > 0) {
+    if (intel.scout.cooldownSeconds > 0 || options.aiController.startDelaySeconds > 0 || !options.aiController.openingComplete) {
       return changed;
     }
 

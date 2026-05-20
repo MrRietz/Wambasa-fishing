@@ -192,7 +192,25 @@ export function chooseScoutUnit(entities: GameEntity[], getDamageState: (entity:
       !entity.economy?.shoreFishing &&
       (entity.kind === 'guard' || entity.kind === 'saboteur'),
   );
-  return candidates.sort((a, b) => getScoutPriority(a) - getScoutPriority(b))[0];
+  const saboteur = candidates.find((entity) => entity.kind === 'saboteur');
+  if (saboteur) {
+    return saboteur;
+  }
+
+  const readyGuards = candidates.filter((entity) => entity.kind === 'guard');
+  const totalGuards = entities.filter(
+    (entity) =>
+      entity.faction === 'enemy' &&
+      entity.kind === 'guard' &&
+      getDamageState(entity) !== 'destroyed' &&
+      entity.movement.speed > 0 &&
+      !entity.renderable.hidden,
+  ).length;
+  if (totalGuards < 3) {
+    return undefined;
+  }
+
+  return readyGuards.sort((a, b) => getScoutPriority(a) - getScoutPriority(b))[0];
 }
 
 function chooseAdaptiveTactic(

@@ -77,6 +77,8 @@ import { createRenderRuntime } from './runtime/renderRuntime';
 
 type BootStatus = 'loading' | 'ready' | 'failed';
 
+const MOVEMENT_RENDER_INTERVAL_SECONDS = 1 / 24;
+
 declare global {
   interface Window {
     __wambasaRts?: RtsDebugState;
@@ -109,6 +111,7 @@ let nextEnemySaboteurId = 1;
 let nextEnemyDockId = 1;
 let nextEnemyBarracksId = 1;
 let nextEnemyGuardTowerId = 1;
+let movementRenderSeconds = 0;
 
 function pickInitialAiStrategy(): AiStrategy {
   const strategies: AiStrategy[] = ['economicBoom', 'harborPressure', 'siege'];
@@ -3993,6 +3996,7 @@ function updateAnimationStates(deltaSeconds: number, layers: RenderLayers): bool
 }
 
 function updateEntityMovement(deltaSeconds: number, layers: RenderLayers): boolean {
+  movementRenderSeconds += deltaSeconds;
   let moved = false;
   for (const entity of entities) {
     if (!entity.moveTarget || entity.movement.speed <= 0) {
@@ -4120,7 +4124,8 @@ function updateEntityMovement(deltaSeconds: number, layers: RenderLayers): boole
     }
   }
 
-  if (moved) {
+  if (moved && movementRenderSeconds >= MOVEMENT_RENDER_INTERVAL_SECONDS) {
+    movementRenderSeconds = 0;
     renderUnits(layers);
     drawSelectionOverlay(layers);
     publishDebugStateForSimulationTick(layers);
