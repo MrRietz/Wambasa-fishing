@@ -1,5 +1,5 @@
 export interface RtsDomElements {
-  rootElement: HTMLDivElement;
+  rootElement: HTMLElement;
   gameElement: HTMLDivElement;
   statusElement: HTMLParagraphElement;
   skirmishButton: HTMLButtonElement;
@@ -214,7 +214,9 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
     </section>
   `;
 
+  const shellElement = requiredElement<HTMLElement>('.rts-shell');
   const elements = {
+    rootElement: shellElement,
     gameElement: requiredElement<HTMLDivElement>('#rts-game'),
     statusElement: requiredElement<HTMLParagraphElement>('#boot-status'),
     skirmishButton: requiredElement<HTMLButtonElement>('#start-button'),
@@ -295,7 +297,7 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
     throw new Error('Unable to create minimap canvas context.');
   }
 
-  return { rootElement: appRoot, ...elements, minimapContext };
+  return { ...elements, minimapContext };
 }
 
 function requiredElement<T extends Element>(selector: string): T {

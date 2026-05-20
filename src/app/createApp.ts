@@ -4905,7 +4905,12 @@ export async function createWambasaRtsApp(): Promise<void> {
 
     skirmishButton.disabled = false;
     skirmishButton.addEventListener('click', () => {
-      void Promise.all([unlockAudio(), requestPlayFullscreen()]).then(() => {
+      void (async () => {
+        try {
+          await Promise.all([unlockAudio(), requestPlayFullscreen()]);
+        } catch (error) {
+          console.warn('Continuing skirmish start after browser media/fullscreen setup failed.', error);
+        }
         skirmishStarted = true;
         pauseMenuOpen = false;
         syncPauseUi();
@@ -4917,7 +4922,7 @@ export async function createWambasaRtsApp(): Promise<void> {
             : 'Skirmish started. Audio unavailable in this browser; controls and F10 menu are ready.',
         );
         publishDebugState(layers);
-      });
+      })();
     });
 
     setBootStatus('ready', 'PixiJS RTS foundation ready.');

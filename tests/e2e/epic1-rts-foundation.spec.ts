@@ -272,6 +272,11 @@ async function getDebugState(page: Page): Promise<RtsDebugState> {
   });
 }
 
+async function startSkirmish(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Start Skirmish Shell' }).click();
+  await expect(page.locator('#boot-status')).toContainText('Skirmish started.');
+}
+
 async function worldToScreen(page: Page, worldX: number, worldY: number): Promise<{ x: number; y: number }> {
   const state = await getDebugState(page);
   const viewportBox = await page.locator('#rts-game').boundingBox();
@@ -288,23 +293,22 @@ test.describe('Epic 1 RTS foundation', () => {
   test('boots Pixi shell with data-backed map, layers, and overlays', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: 'Wambåsa Fishing Wars' })).toBeVisible();
-    await expect(page.getByText('PixiJS RTS foundation ready.')).toBeVisible();
-    await expect(page.locator('.rts-alert-item[data-message="PixiJS RTS foundation ready."]')).toBeVisible();
+    await expect(page.locator('.rts-shell')).toHaveAttribute('data-boot-status', 'ready', { timeout: 15_000 });
+    await expect(page.locator('#boot-status')).toHaveText('PixiJS RTS foundation ready.');
+    await expect(page.locator('.rts-loading-screen')).toBeHidden();
     await expect(page.locator('#objective-list')).toContainText('Select your crew');
-    await expect(page.locator('#objective-list')).toContainText('Win the skirmish');
     await expect(page.locator('.rts-objective-item[data-objective-id="select"]')).toHaveAttribute('data-current', 'true');
     await expect(page.locator('#rts-game canvas')).toBeVisible();
     await expect(page.locator('#rts-minimap')).toBeVisible();
 
     const state = await getDebugState(page);
     expect(state.map).toEqual(expect.objectContaining({
-      width: 3200,
-      height: 1400,
-      blockers: 4,
-      buildable: 2,
-      metalFields: 3,
-      fishingZones: 2,
+      width: 7800,
+      height: 3200,
+      blockers: 18,
+      buildable: 7,
+      metalFields: 14,
+      fishingZones: 21,
     }));
     expect(state.layerLabels).toEqual([
       'terrain-layer',
@@ -337,18 +341,20 @@ test.describe('Epic 1 RTS foundation', () => {
         musicLayer: 'calm',
       }),
     );
-    expect(state.alerts[0]).toEqual(expect.objectContaining({ message: 'PixiJS RTS foundation ready.', severity: 'success' }));
+    expect(state.alerts).toEqual([]);
     expect(state.objectives.currentId).toBe('select');
-    expect(state.objectives.items.map((objective) => objective.id)).toEqual(['select', 'harvest', 'dock', 'boat', 'fish', 'defense', 'win']);
+    expect(state.objectives.items.map((objective) => objective.id)).toEqual(['select', 'harvest', 'fish', 'dock', 'boat', 'defense', 'win']);
     expect(state.balance).toEqual({
-      playerStartingMetal: 280,
-      playerStartingCash: 100,
-      aiStartingMetal: 280,
-      aiStartingCash: 100,
+      playerStartingMetal: 320,
+      playerStartingCash: 120,
+      aiStartingMetal: 320,
+      aiStartingCash: 120,
       aiStartDelaySeconds: 8,
-      aiFirstRaidGraceSeconds: 20,
+      aiFirstRaidGraceSeconds: 42,
+      aiRepeatRaidDelaySeconds: 32,
       starterMetalCargo: 100,
       firstBoatCashValue: 160,
+      economicVictoryGraceSeconds: 1800,
     });
   });
 
@@ -399,7 +405,7 @@ test.describe('Epic 1 RTS foundation', () => {
     await page.goto('/');
 
     await page.getByRole('button', { name: 'Start Skirmish Shell' }).click();
-    await expect(page.locator('#boot-status')).toContainText(/Music online|Audio unavailable/);
+    await expect(page.locator('#boot-status')).toContainText('Skirmish started.');
 
     const state = await getDebugState(page);
     if (state.audio.supported) {
@@ -825,21 +831,20 @@ test.describe('Epic 3 land economy foundation', () => {
 test.describe('Epic 4 worker building placement foundation', () => {
   test('selecting a worker reveals building actions and starts House placement preview', async ({ page }) => {
     await page.goto('/');
+    await startSkirmish(page);
     const worker = await worldToScreen(page, 760, 1000);
     await page.mouse.click(worker.x, worker.y);
 
     await expect(page.locator('#worker-command-panel')).toBeVisible();
     await expect(page.getByText('Worker Build Menu')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Plan House - 90 metal' })).toBeEnabled();
-    await expect(page.locator('#worker-build-details')).toContainText('Prerequisite: select a worker.');
-    await expect(page.locator('#worker-build-details')).toContainText('Guard Tower: 150 metal | 7.5s build | 260 range | targets enemy raiders');
+    await expect(page.locator('#worker-build-details')).toContainText('1 worker | reels 0');
 
     await page.getByRole('button', { name: 'Plan House - 90 metal' }).click();
-    const validPlacement = await worldToScreen(page, 950, 1050);
+    const validPlacement = await worldToScreen(page, 950, 1150);
     await page.mouse.move(validPlacement.x, validPlacement.y);
 
-    await expect(page.locator('#placement-readout')).toContainText('House foundation: valid');
-    await expect(page.locator('#placement-readout')).toContainText('90 metal | 4.5s build | +8 crew cap');
+    await expect(page.locator('#placement-readout')).toContainText('House foundation: ready');
     const state = await getDebugState(page);
     expect(state.placement).toEqual(
       expect.objectContaining({
@@ -854,19 +859,20 @@ test.describe('Epic 4 worker building placement foundation', () => {
 
   test('blocks invalid House placement over terrain blockers without spending metal', async ({ page }) => {
     await page.goto('/');
+    await startSkirmish(page);
     const worker = await worldToScreen(page, 760, 1000);
     await page.mouse.click(worker.x, worker.y);
 
     await page.getByRole('button', { name: 'Plan House - 90 metal' }).click();
-    const blockedPlacement = await worldToScreen(page, 1100, 1000);
+    const blockedPlacement = await worldToScreen(page, 190, 650);
     await page.mouse.move(blockedPlacement.x, blockedPlacement.y);
 
-    await expect(page.locator('#placement-readout')).toContainText('blocked - blocked terrain');
+    await expect(page.locator('#placement-readout')).toContainText('House foundation: blocked terrain');
     await page.mouse.click(blockedPlacement.x, blockedPlacement.y);
 
-    await expect(page.getByText('Placement blocked: blocked terrain.')).toBeVisible();
+    await expect(page.locator('#boot-status')).toHaveText('Placement blocked: blocked terrain.');
     const state = await getDebugState(page);
-    expect(state.resources.metal).toBe(280);
+    expect(state.resources.metal).toBe(320);
     expect(state.lastCommandResult).toEqual(
       expect.objectContaining({ ok: false, kind: 'placement', reason: 'invalid-placement' }),
     );
@@ -882,18 +888,19 @@ test.describe('Epic 4 worker building placement foundation', () => {
 
   test('confirms valid House placement, spends metal, and assigns the worker to build', async ({ page }) => {
     await page.goto('/');
+    await startSkirmish(page);
     const worker = await worldToScreen(page, 760, 1000);
     await page.mouse.click(worker.x, worker.y);
 
     await page.getByRole('button', { name: 'Plan House - 90 metal' }).click();
-    const validPlacement = await worldToScreen(page, 950, 1050);
+    const validPlacement = await worldToScreen(page, 950, 1150);
     await page.mouse.move(validPlacement.x, validPlacement.y);
     await page.mouse.click(validPlacement.x, validPlacement.y);
 
-    await expect(page.getByText('House foundation started. Dockyard Worker is moving to build.')).toBeVisible();
-    await expect(page.locator('#placement-readout')).toHaveText('No placement active');
+    await expect(page.locator('#boot-status')).toHaveText('House foundation started. Dockyard Worker is moving to build.');
+    await expect(page.locator('#placement-readout')).toHaveText('Placement idle');
     const state = await getDebugState(page);
-    expect(state.resources.metal).toBe(160);
+    expect(state.resources.metal).toBe(230);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: true, kind: 'placement', building: 'house' }));
     expect(state.placement).toEqual({ active: false });
     expect(state.entities).toEqual(
@@ -920,20 +927,21 @@ test.describe('Epic 4 worker building placement foundation', () => {
 
   test('worker completes House construction and expands crew capacity', async ({ page }) => {
     await page.goto('/');
+    await startSkirmish(page);
     const worker = await worldToScreen(page, 760, 1000);
     await page.mouse.click(worker.x, worker.y);
 
     await page.getByRole('button', { name: 'Plan House - 90 metal' }).click();
-    const validPlacement = await worldToScreen(page, 950, 1050);
+    const validPlacement = await worldToScreen(page, 950, 1150);
     await page.mouse.move(validPlacement.x, validPlacement.y);
     await page.mouse.click(validPlacement.x, validPlacement.y);
 
-    await page.waitForFunction(() => window.__wambasaRts?.crew.capacity === 14, null, { timeout: 8000 });
-    await expect(page.locator('#economy-readout')).toHaveText('Metal: 190 | Cash: 100 | Crew: 6/14');
-    await expect(page.getByText('Crew House complete. Crew capacity increased to 14.')).toBeVisible();
+    await page.waitForFunction(() => window.__wambasaRts?.crew.capacity === 18, null, { timeout: 24000 });
+    await expect(page.locator('#economy-readout')).toContainText('Metal230Cash120Crew5/18');
+    await expect(page.locator('#boot-status')).toContainText('Crew House complete.');
 
     const state = await getDebugState(page);
-    expect(state.crew).toEqual({ used: 4, reserved: 0, capacity: 14 });
+    expect(state.crew).toEqual({ used: 5, reserved: 0, capacity: 18 });
     expect(state.entities).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -949,6 +957,7 @@ test.describe('Epic 4 worker building placement foundation', () => {
 
   test('Dock placement is only valid on shoreline cells', async ({ page }) => {
     await page.goto('/');
+    await startSkirmish(page);
     const worker = await worldToScreen(page, 850, 695);
     await page.mouse.click(worker.x, worker.y);
 
@@ -957,7 +966,7 @@ test.describe('Epic 4 worker building placement foundation', () => {
 
     const validShore = await worldToScreen(page, 900, 500);
     await page.mouse.move(validShore.x, validShore.y);
-    await expect(page.locator('#placement-readout')).toContainText('Dock foundation: valid');
+    await expect(page.locator('#placement-readout')).toContainText('Dock foundation: ready');
 
     let state = await getDebugState(page);
     expect(state.placement).toEqual(
@@ -971,7 +980,7 @@ test.describe('Epic 4 worker building placement foundation', () => {
 
     const invalidLand = await worldToScreen(page, 900, 700);
     await page.mouse.move(invalidLand.x, invalidLand.y);
-    await expect(page.locator('#placement-readout')).toContainText('blocked - wrong terrain (shoreline required)');
+    await expect(page.locator('#placement-readout')).toContainText('Dock foundation: wrong terrain (shoreline required)');
 
     state = await getDebugState(page);
     expect(state.placement).toEqual(
@@ -986,25 +995,27 @@ test.describe('Epic 4 worker building placement foundation', () => {
 
   test('placement mode cancels cleanly with Escape and right-click', async ({ page }) => {
     await page.goto('/');
+    await startSkirmish(page);
     const worker = await worldToScreen(page, 760, 1000);
     await page.mouse.click(worker.x, worker.y);
 
     await page.getByRole('button', { name: 'Plan House - 90 metal' }).click();
-    await expect(page.locator('#placement-readout')).toContainText('Right-click or Esc to cancel');
+    await expect(page.locator('#placement-readout')).toContainText('House foundation: ready');
     await page.keyboard.press('Escape');
-    await expect(page.locator('#placement-readout')).toHaveText('No placement active');
-    await expect(page.getByText('Building placement cancelled.')).toBeVisible();
+    await expect(page.locator('#placement-readout')).toHaveText('Placement idle');
+    await expect(page.locator('#boot-status')).toHaveText('Building placement cancelled.');
 
     await page.getByRole('button', { name: 'Plan Dock - 120 metal' }).click();
-    await expect(page.locator('#placement-readout')).toContainText('Right-click or Esc to cancel');
+    await expect(page.locator('#placement-readout')).toContainText('Dock foundation: wrong terrain (shoreline required)');
     const placementPoint = await worldToScreen(page, 900, 500);
     await page.mouse.click(placementPoint.x, placementPoint.y, { button: 'right' });
-    await expect(page.locator('#placement-readout')).toHaveText('No placement active');
-    await expect(page.getByText('Building placement cancelled.')).toBeVisible();
+    await expect(page.locator('#placement-readout')).toHaveText('Placement idle');
+    await expect(page.locator('#boot-status')).toHaveText('Building placement cancelled.');
   });
 
   test('worker completes Dock construction and exposes boat production/unload role', async ({ page }) => {
     await page.goto('/');
+    await startSkirmish(page);
     const worker = await worldToScreen(page, 850, 695);
     await page.mouse.click(worker.x, worker.y);
 
@@ -1013,9 +1024,9 @@ test.describe('Epic 4 worker building placement foundation', () => {
     await page.mouse.move(validShore.x, validShore.y);
     await page.mouse.click(validShore.x, validShore.y);
 
-    await expect(page.getByText('Dock foundation started. Factory Worker is moving to build.')).toBeVisible();
+    await expect(page.locator('#boot-status')).toHaveText('Dock foundation started. Factory Worker is moving to build.');
     let state = await getDebugState(page);
-    expect(state.resources.metal).toBe(120);
+    expect(state.resources.metal).toBe(200);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: true, kind: 'placement', building: 'dock' }));
 
     await page.waitForFunction(
@@ -1023,7 +1034,7 @@ test.describe('Epic 4 worker building placement foundation', () => {
       null,
       { timeout: 16000 },
     );
-    await expect(page.getByText('Working Dock complete. Boat production and unload point ready.')).toBeVisible();
+    await expect(page.locator('#boot-status')).toHaveText('Working Dock complete. Boat production and unload point ready.');
 
     state = await getDebugState(page);
     const builtDock = state.entities.find((entity) => entity.kind === 'dock' && entity.name === 'Working Dock' && entity.construction?.complete);
@@ -1037,38 +1048,38 @@ test.describe('Epic 4 worker building placement foundation', () => {
 
     const dockScreen = await worldToScreen(page, builtDock?.x ?? 900, builtDock?.y ?? 500);
     await page.mouse.click(dockScreen.x, dockScreen.y);
-    await expect(page.locator('#selection-readout')).toContainText('Boat production');
-    await expect(page.locator('#selection-readout')).toContainText('Fish unload');
+    await expect(page.locator('#selection-readout')).toContainText('Build boats');
+    await expect(page.locator('#selection-readout')).toContainText('Queue 0');
   });
 
   test('worker can place a Guard Tower defensive structure and invalid placement does not spend metal', async ({ page }) => {
     await page.goto('/');
+    await startSkirmish(page);
     const worker = await worldToScreen(page, 760, 1000);
     await page.mouse.click(worker.x, worker.y);
 
     await expect(page.getByRole('button', { name: 'Plan Guard Tower - 150 metal' })).toBeEnabled();
-    await expect(page.locator('#worker-build-details')).toContainText('Guard Tower: 150 metal | 7.5s build | 260 range | targets enemy raiders');
+    await expect(page.locator('#worker-build-details')).toContainText('1 worker | reels 0');
     await page.getByRole('button', { name: 'Plan Guard Tower - 150 metal' }).click();
 
-    const blockedPlacement = await worldToScreen(page, 1100, 1000);
+    const blockedPlacement = await worldToScreen(page, 190, 650);
     await page.mouse.move(blockedPlacement.x, blockedPlacement.y);
-    await expect(page.locator('#placement-readout')).toContainText('blocked - blocked terrain');
+    await expect(page.locator('#placement-readout')).toContainText('Guard Tower foundation: blocked terrain');
     await page.mouse.click(blockedPlacement.x, blockedPlacement.y);
 
-    await expect(page.getByText('Placement blocked: blocked terrain.')).toBeVisible();
+    await expect(page.locator('#boot-status')).toHaveText('Placement blocked: blocked terrain.');
     let state = await getDebugState(page);
-    expect(state.resources.metal).toBe(280);
+    expect(state.resources.metal).toBe(320);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: false, kind: 'placement', reason: 'invalid-placement' }));
 
-    const validPlacement = await worldToScreen(page, 980, 1060);
+    const validPlacement = await worldToScreen(page, 980, 1150);
     await page.mouse.move(validPlacement.x, validPlacement.y);
-    await expect(page.locator('#placement-readout')).toContainText('Guard Tower foundation: valid');
-    await expect(page.locator('#placement-readout')).toContainText('150 metal | 7.5s build | 260 range | targets enemy raiders');
+    await expect(page.locator('#placement-readout')).toContainText('Guard Tower foundation: ready');
     await page.mouse.click(validPlacement.x, validPlacement.y);
 
-    await expect(page.getByText('Guard Tower foundation started. Dockyard Worker is moving to build.')).toBeVisible();
+    await expect(page.locator('#boot-status')).toHaveText('Guard Tower foundation started. Dockyard Worker is moving to build.');
     state = await getDebugState(page);
-    expect(state.resources.metal).toBe(130);
+    expect(state.resources.metal).toBe(170);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: true, kind: 'placement', building: 'guardTower' }));
     expect(state.entities).toEqual(
       expect.arrayContaining([
@@ -1086,7 +1097,7 @@ test.describe('Epic 4 worker building placement foundation', () => {
       null,
       { timeout: 16000 },
     );
-    await expect(page.getByText('Guard Tower complete. Defensive position ready.')).toBeVisible();
+    await expect(page.locator('#boot-status')).toHaveText('Guard Tower complete. Defensive position ready.');
 
     state = await getDebugState(page);
     const builtTower = state.entities.find((entity) => entity.kind === 'guardTower' && entity.name === 'Guard Tower');
@@ -1101,12 +1112,13 @@ test.describe('Epic 4 worker building placement foundation', () => {
 
     const towerScreen = await worldToScreen(page, builtTower?.x ?? 980, builtTower?.y ?? 1060);
     await page.mouse.click(towerScreen.x, towerScreen.y);
-    await expect(page.locator('#selection-readout')).toContainText('Defensive structure');
-    await expect(page.locator('#selection-readout')).toContainText('Targets enemy raiders');
+    await expect(page.locator('#selection-readout')).toContainText('Defense Tower');
+    await expect(page.locator('#selection-readout')).toContainText('Auto-engages enemies in range');
   });
 
   test('worker repairs a damaged friendly building', async ({ page }) => {
     await page.goto('/');
+    await startSkirmish(page);
 
     await page.waitForFunction(() => Boolean(window.__wambasaRtsDamageEntity), null, { timeout: 5000 });
     const damaged = await page.evaluate(() => window.__wambasaRtsDamageEntity?.('player-factory', 500) ?? false);
@@ -1123,7 +1135,7 @@ test.describe('Epic 4 worker building placement foundation', () => {
     await page.mouse.click(worker.x, worker.y);
     const factory = await worldToScreen(page, 767, 825);
     await page.mouse.click(factory.x, factory.y, { button: 'right' });
-    await expect(page.getByLabel('success: Repair command queued for 1 worker.')).toBeVisible();
+    await expect(page.locator('#boot-status')).toHaveText('Repair command queued for 1 worker.');
 
     state = await getDebugState(page);
     expect(state.lastCommandResult).toEqual(expect.objectContaining({ ok: true, kind: 'repair', targetId: 'player-factory' }));

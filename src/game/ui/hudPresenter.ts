@@ -210,7 +210,7 @@ export function buildHudPresentation(input: HudPresentationInput): HudPresentati
 }
 
 export function createHudPresenter(
-  rootElement: HTMLDivElement,
+  rootElement: HTMLElement,
   elements: Pick<
     RtsDomElements,
     | 'commandHintElement'
