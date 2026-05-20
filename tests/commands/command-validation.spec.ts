@@ -15,6 +15,7 @@ import {
 } from '../../src/game/commands/commandHandlers';
 import { tickAiCoordinator, type AiControllerState } from '../../src/game/ai/aiCoordinator';
 import { updateAiDefenseResponse } from '../../src/game/ai/aiDefenseSystem';
+import { createCombatRuntime } from '../../src/app/runtime/combatRuntime';
 import { createAiIntelState, mergeObservedPlayerState, scanPlayerIntel, updateAdaptiveTactic } from '../../src/game/ai/aiIntelSystem';
 import { chooseAiRaidAttacker, findAiTerritoryThreat } from '../../src/game/ai/aiPressureSystem';
 import { buildingCatalog, type BuildingPlanKind } from '../../src/game/data/buildings';
@@ -885,6 +886,71 @@ const tests: TestCase[] = [
       assert.equal(guard.movement.state, 'moving');
       assert.equal(guard.economy?.attack?.phase, 'to-target');
       assert.equal(enemy.economy?.health, 85);
+    },
+  },
+  {
+    name: 'enemy raid combat damages player target and raises player warning',
+    run: () => {
+      const guard = makeEntity({ id: 'enemy-guard-1', kind: 'guard', faction: 'enemy', economy: { health: 110 } });
+      const truck = makeEntity({ id: 'truck-1', kind: 'truck', faction: 'player', economy: { health: 140 } });
+      guard.x = truck.x + 60;
+      guard.y = truck.y;
+      guard.economy = {
+        ...guard.economy,
+        attack: { targetId: truck.id, phase: 'attacking', damagePerSecond: 24, range: 90 },
+      };
+      const entities = [guard, truck];
+      const warnings: Array<{ targetId: string; phase: 'incoming' | 'damaged' | 'destroyed' }> = [];
+      const aiController = makeAiControllerState();
+      aiController.raidIssued = true;
+
+      const runtime = createCombatRuntime({
+        entities,
+        aiEconomyState: { metal: 0 },
+        aiController,
+        aiDefenseState: { threatCount: 0, defensiveStructureBuilt: false },
+        getNextEnemyGuardTowerId: () => 1,
+        setNextEnemyGuardTowerId: () => {},
+        getDamageState: (entity) => entity.economy?.damageState ?? 'healthy',
+        getCollisionRadius: (entity) => entity.collider.kind === 'circle' ? entity.collider.radius : 40,
+        getAttackApproachPoint: targetPoint,
+        getRaidApproachPoint: targetPoint,
+        getAiRepeatRaidDelaySeconds: () => 20,
+        findLandPath: straightPath,
+        findEntityLandPath: (_entity, _start, goal) => [goal],
+        findWaterPath: straightPath,
+        applyDamage: (target, amount) => {
+          const health = Math.max(0, (target.economy?.health ?? 0) - amount);
+          target.economy = { ...target.economy, health };
+          return health <= 0 ? 'destroyed' : 'damaged';
+        },
+        issuePlayerAssetWarning: (target, phase) => warnings.push({ targetId: target.id, phase }),
+        playCombatFireSfx: () => {},
+        playCombatHitSfx: () => {},
+        setLastCombatEvent: () => {},
+        renderMap: () => {},
+        renderUnits: () => {},
+        renderBuildings: () => {},
+        drawCombatTargetingOverlay: () => {},
+        drawSelectionOverlay: () => {},
+        drawDestinationOverlay: () => {},
+        updateSelectionReadout: () => {},
+        publishDebugState: () => {},
+        guardTowerRange: 300,
+        guardTowerDamagePerSecond: 20,
+        findGuardTowerTarget: () => undefined,
+      });
+
+      const changed = runtime.updateAiRaidActive(1, {} as never);
+
+      assert.equal(changed, true);
+      assert.equal(truck.economy?.health, 116);
+      assert.equal(aiController.lastRaidEvent?.kind, 'damaged');
+      assert.equal(aiController.lastRaidEvent?.attackerId, 'enemy-guard-1');
+      assert.deepEqual(warnings, [
+        { targetId: 'truck-1', phase: 'incoming' },
+        { targetId: 'truck-1', phase: 'damaged' },
+      ]);
     },
   },
   {

@@ -87,7 +87,7 @@ export function createCombatRuntime(options: CreateCombatRuntimeOptions): Combat
       if (event.kind === 'raidDamaging') {
         options.aiController.lastAction = `Rival raider damaging ${event.targetName}.`;
       }
-      if (event.kind === 'attacking' && event.faction === 'player') {
+      if (event.kind === 'attacking' && event.faction === 'enemy') {
         const target = options.entities.find((entity) => entity.id === event.targetId);
         if (target) {
           options.issuePlayerAssetWarning(target, 'incoming');
@@ -99,7 +99,7 @@ export function createCombatRuntime(options: CreateCombatRuntimeOptions): Combat
           options.issuePlayerAssetWarning(target, 'incoming');
         }
       }
-      if ((event.kind === 'damaged' || event.kind === 'destroyed') && event.faction === 'player') {
+      if ((event.kind === 'damaged' || event.kind === 'destroyed') && event.faction === 'enemy') {
         const target = options.entities.find((entity) => entity.id === event.targetId);
         if (target) {
           options.issuePlayerAssetWarning(target, event.kind);
