@@ -275,6 +275,7 @@ const recentAlerts: RtsDebugState['alerts'] = [];
 let lastFrameMs = 0;
 const frameSamples: number[] = [];
 let simulationClockSeconds = 0;
+let lastHighFrequencyDebugPublishSeconds = -Infinity;
 let fogRefreshSeconds = 0;
 let lastCombatFireSfxAtSeconds = -1;
 let lastCombatHitSfxAtSeconds = -1;
@@ -714,6 +715,14 @@ function publishDebugState(layers: RenderLayers): void {
     getDamageState,
   });
   window.__wambasaRts = debugState;
+}
+
+function publishDebugStateForSimulationTick(layers: RenderLayers): void {
+  if (simulationClockSeconds - lastHighFrequencyDebugPublishSeconds < 0.2) {
+    return;
+  }
+  lastHighFrequencyDebugPublishSeconds = simulationClockSeconds;
+  publishDebugState(layers);
 }
 
 function updateFogOfWar(layers: RenderLayers): void {
@@ -3977,7 +3986,7 @@ function updateAnimationStates(deltaSeconds: number, layers: RenderLayers): bool
   if (changed) {
     renderEntities(layers);
     drawSelectionOverlay(layers);
-    publishDebugState(layers);
+    publishDebugStateForSimulationTick(layers);
   }
 
   return changed;
@@ -4114,7 +4123,7 @@ function updateEntityMovement(deltaSeconds: number, layers: RenderLayers): boole
   if (moved) {
     renderUnits(layers);
     drawSelectionOverlay(layers);
-    publishDebugState(layers);
+    publishDebugStateForSimulationTick(layers);
   }
 
   return moved;

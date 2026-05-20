@@ -43,7 +43,8 @@ export function planTruckHarvestAssignments(
     return { entity, path: [] as PathPoint[], target: candidateTargets[0] };
   });
 
-  return plannedMoves.some((move) => move.path.length === 0) ? null : plannedMoves;
+  const reachableMoves = plannedMoves.filter((move) => move.path.length > 0);
+  return reachableMoves.length > 0 ? reachableMoves : null;
 }
 
 export function planTruckReturnToField(
@@ -86,7 +87,8 @@ export function planWorkerShoreFishingAssignments(
     return { entity, path: [] as PathPoint[], target: basePoint };
   });
 
-  return plannedMoves.some((move) => move.path.length === 0) ? null : plannedMoves;
+  const reachableMoves = plannedMoves.filter((move) => move.path.length > 0);
+  return reachableMoves.length > 0 ? reachableMoves : null;
 }
 
 export function planBoatFishingAssignments(

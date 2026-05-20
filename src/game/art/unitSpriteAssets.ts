@@ -6,7 +6,7 @@ import { getUnitAnimationFrameCount, isHumanoidAnimationUnit, unitAnimationManif
 const textures = new Map<string, Texture>();
 const STARTUP_TEXTURE_CONCURRENCY = 8;
 const DEFERRED_TEXTURE_CONCURRENCY = 6;
-type VehicleSpriteKind = 'truck' | 'boat';
+type VehicleSpriteKind = 'truck' | 'boat' | 'attackBoat';
 type BuildingSpriteKind = 'factory' | 'dock' | 'house' | 'guardTower' | 'techLab' | 'barracks';
 export type EffectSpriteKind = 'constructionDust' | 'repairSparks' | 'harvestSparks' | 'fishSplash' | 'cannonMuzzleFlash' | 'sabotageBurst' | 'smokePlume';
 type TerrainPlateKind = 'water' | 'shoreline' | 'land' | 'road';
@@ -99,6 +99,12 @@ const vehicleSpriteDefinitions: Record<VehicleSpriteKind, Partial<Record<Animati
     damaged: { frameCount: 2 },
     destroyed: { frameCount: 2 },
   },
+  attackBoat: {
+    move: { frameCount: 4 },
+    attack: { frameCount: 4 },
+    damaged: { frameCount: 2 },
+    destroyed: { frameCount: 2 },
+  },
 };
 const optionalTruckSpritePaths = Object.entries(vehicleSpriteDefinitions.truck).flatMap(([action, animation]) =>
   truckSpriteDirections
@@ -110,6 +116,16 @@ const optionalTruckSpritePaths = Object.entries(vehicleSpriteDefinitions.truck).
     ),
 );
 for (const path of optionalTruckSpritePaths) {
+  optionalSpritePaths.add(path);
+}
+const optionalAttackBoatSpritePaths = Object.entries(vehicleSpriteDefinitions.attackBoat).flatMap(([action, animation]) =>
+  getVehicleSpriteDirections('attackBoat').flatMap((direction) =>
+    Array.from({ length: animation?.frameCount ?? 0 }, (_, frame) =>
+      getVehicleSpritePath('attackBoat', action as AnimationAction, direction, frame),
+    ),
+  ),
+);
+for (const path of optionalAttackBoatSpritePaths) {
   optionalSpritePaths.add(path);
 }
 
@@ -157,7 +173,7 @@ export async function loadUnitSpriteTextures(): Promise<UnitSpriteTextureLoadRes
   const deferredPaths = listUnitSpritePaths().filter((path) => !startupPaths.includes(path));
   textures.clear();
   await loadTexturePaths(startupPaths, STARTUP_TEXTURE_CONCURRENCY);
-  const deferred = loadTexturePaths(deferredPaths, DEFERRED_TEXTURE_CONCURRENCY);
+  const deferred = loadTexturePaths(deferredPaths, DEFERRED_TEXTURE_CONCURRENCY, true);
   return {
     startupPathCount: startupPaths.length,
     deferredPathCount: deferredPaths.length,
@@ -165,17 +181,37 @@ export async function loadUnitSpriteTextures(): Promise<UnitSpriteTextureLoadRes
   };
 }
 
-export function getUnitSpriteTexture(kind: EntityKind, action: AnimationAction, direction: AnimationDirection, frame: number): Texture | undefined {
+export function getUnitSpriteTexture(
+  kind: EntityKind,
+  action: AnimationAction,
+  direction: AnimationDirection,
+  frame: number,
+  combatRole?: string,
+): Texture | undefined {
   if (isVehicleSpriteKind(kind)) {
-    const spriteAction = resolveVehicleSpriteAction(kind, action);
+    const vehicleKind = resolveVehicleSpriteKind(kind, combatRole);
+    const spriteAction = resolveVehicleSpriteAction(vehicleKind, action);
     const presentation = resolveSpriteFacingPresentation(kind, direction);
-    const candidateDirections = resolveVehicleTextureDirections(kind, presentation.textureDirection);
-    const texture = getVehicleSpriteTextureForDirections(kind, spriteAction, candidateDirections, frame);
+    const candidateDirections = resolveVehicleTextureDirections(vehicleKind, presentation.textureDirection);
+    const texture = getVehicleSpriteTextureForDirections(vehicleKind, spriteAction, candidateDirections, frame);
     if (texture) {
       return texture;
     }
     if (spriteAction !== 'move') {
-      return getVehicleSpriteTextureForDirections(kind, 'move', candidateDirections, frame);
+      const moveTexture = getVehicleSpriteTextureForDirections(vehicleKind, 'move', candidateDirections, frame);
+      if (moveTexture) {
+        return moveTexture;
+      }
+    }
+    if (vehicleKind === 'attackBoat') {
+      const fallbackAction = resolveVehicleSpriteAction('boat', action);
+      const fallbackTexture = getVehicleSpriteTextureForDirections('boat', fallbackAction, resolveVehicleTextureDirections('boat', presentation.textureDirection), frame);
+      if (fallbackTexture) {
+        return fallbackTexture;
+      }
+      if (fallbackAction !== 'move') {
+        return getVehicleSpriteTextureForDirections('boat', 'move', resolveVehicleTextureDirections('boat', presentation.textureDirection), frame);
+      }
     }
     return undefined;
   }
@@ -315,7 +351,7 @@ function listStartupSpritePaths(): string[] {
   ]);
 }
 
-async function loadTexturePaths(paths: string[], concurrency: number): Promise<void> {
+async function loadTexturePaths(paths: string[], concurrency: number, tolerateMissing = false): Promise<void> {
   const queue = [...paths];
   const workerCount = Math.max(1, Math.min(concurrency, queue.length));
   await Promise.all(
@@ -329,9 +365,10 @@ async function loadTexturePaths(paths: string[], concurrency: number): Promise<v
           const texture = await Assets.load<Texture>(resolvePublicAssetPath(path));
           textures.set(path, texture);
         } catch (error) {
-          if (!optionalSpritePaths.has(path)) {
+          if (!tolerateMissing && !optionalSpritePaths.has(path)) {
             throw error;
           }
+          console.warn(`Runtime sprite skipped: ${path}`, error);
         }
       }
     }),
@@ -355,8 +392,12 @@ function resolveHumanoidSpriteDirection(kind: HumanoidUnitKind, direction: Cardi
   return direction;
 }
 
-function isVehicleSpriteKind(kind: EntityKind): kind is VehicleSpriteKind {
+function isVehicleSpriteKind(kind: EntityKind): kind is Extract<EntityKind, 'truck' | 'boat'> {
   return kind === 'truck' || kind === 'boat';
+}
+
+function resolveVehicleSpriteKind(kind: Extract<EntityKind, 'truck' | 'boat'>, combatRole?: string): VehicleSpriteKind {
+  return kind === 'boat' && combatRole === 'attack' ? 'attackBoat' : kind;
 }
 
 function resolveVehicleSpriteAction(kind: VehicleSpriteKind, action: AnimationAction): AnimationAction {

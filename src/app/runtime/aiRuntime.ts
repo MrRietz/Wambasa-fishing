@@ -187,7 +187,7 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
         !entity.economy?.attack &&
         options.getDamageState(entity) !== 'destroyed',
     );
-    const worker = availableWorkers.length > 2 ? availableWorkers[0] : undefined;
+    const worker = availableWorkers.length > 3 ? availableWorkers[0] : undefined;
     if (!worker) {
       return false;
     }

@@ -190,7 +190,7 @@ export function chooseScoutUnit(entities: GameEntity[], getDamageState: (entity:
       !entity.economy?.factoryDuty &&
       !entity.economy?.harvesting &&
       !entity.economy?.shoreFishing &&
-      (entity.kind === 'worker' || entity.kind === 'guard' || entity.kind === 'saboteur'),
+      (entity.kind === 'guard' || entity.kind === 'saboteur'),
   );
   return candidates.sort((a, b) => getScoutPriority(a) - getScoutPriority(b))[0];
 }

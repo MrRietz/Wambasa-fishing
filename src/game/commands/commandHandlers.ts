@@ -542,6 +542,8 @@ export function executeFishingCommand(input: FishingCommandInput): TargetCommand
     };
   }
 
+  const routedBoats = plannedMoves.map((move) => move.entity);
+  const longestPath = Math.max(...plannedMoves.map((move) => move.path.length));
   plannedMoves.forEach(({ entity, path }) => {
     entity.path = path;
     entity.moveTarget = path[0];
@@ -560,14 +562,14 @@ export function executeFishingCommand(input: FishingCommandInput): TargetCommand
     result: {
       ok: true,
       kind: 'fish',
-      message: `Fishing command queued for ${selectedBoats.length} boat${selectedBoats.length === 1 ? '' : 's'}.`,
-      pathLength: Math.max(...plannedMoves.map((move) => move.path.length)),
+      message: `Fishing command queued for ${routedBoats.length} boat${routedBoats.length === 1 ? '' : 's'}.`,
+      pathLength: longestPath,
     },
     moveCommand: {
       x: plannedMoves[0].target.x,
       y: plannedMoves[0].target.y,
-      entityIds: selectedBoats.map((entity) => entity.id),
-      pathLength: Math.max(...plannedMoves.map((move) => move.path.length)),
+      entityIds: routedBoats.map((entity) => entity.id),
+      pathLength: longestPath,
     },
   };
 }
@@ -748,6 +750,8 @@ export function executeFishUnloadCommand(input: FishUnloadCommandInput): TargetC
       result: { ok: false, kind: 'fish', reason: 'unreachable', message: 'Fish unload rejected: no water route reaches that dock.' },
     };
   }
+  const routedBoats = plannedMoves.map((move) => move.entity);
+  const longestPath = Math.max(...plannedMoves.map((move) => move.path.length));
   plannedMoves.forEach(({ entity, path }) => {
     entity.path = path;
     entity.moveTarget = path[0];
@@ -765,14 +769,14 @@ export function executeFishUnloadCommand(input: FishUnloadCommandInput): TargetC
     result: {
       ok: true,
       kind: 'fish',
-      message: `Fish unload command queued for ${loadedBoats.length} boat${loadedBoats.length === 1 ? '' : 's'}.`,
-      pathLength: Math.max(...plannedMoves.map((move) => move.path.length)),
+      message: `Fish unload command queued for ${routedBoats.length} boat${routedBoats.length === 1 ? '' : 's'}.`,
+      pathLength: longestPath,
     },
     moveCommand: {
       x: plannedMoves[0].target.x,
       y: plannedMoves[0].target.y,
-      entityIds: loadedBoats.map((entity) => entity.id),
-      pathLength: Math.max(...plannedMoves.map((move) => move.path.length)),
+      entityIds: routedBoats.map((entity) => entity.id),
+      pathLength: longestPath,
     },
   };
 }
@@ -928,6 +932,8 @@ export function executeDockRepairCommand(input: DockRepairCommandInput): TargetC
       result: { ok: false, kind: 'repair', reason: 'unreachable', message: 'Dock repair rejected: no water route reaches that dock.' },
     };
   }
+  const routedBoats = plannedMoves.map((move) => move.entity);
+  const longestPath = Math.max(...plannedMoves.map((move) => move.path.length));
   plannedMoves.forEach(({ entity, path }) => {
     entity.path = path;
     entity.moveTarget = path[0];
@@ -947,14 +953,14 @@ export function executeDockRepairCommand(input: DockRepairCommandInput): TargetC
       ok: true,
       kind: 'repair',
       targetId: input.dock.id,
-      message: `Dock repair queued for ${repairableBoats.length} boat${repairableBoats.length === 1 ? '' : 's'}. Costs 10 cash/s while repairing.`,
-      pathLength: Math.max(...plannedMoves.map((move) => move.path.length)),
+      message: `Dock repair queued for ${routedBoats.length} boat${routedBoats.length === 1 ? '' : 's'}. Costs 10 cash/s while repairing.`,
+      pathLength: longestPath,
     },
     moveCommand: {
       x: plannedMoves[0].target.x,
       y: plannedMoves[0].target.y,
-      entityIds: repairableBoats.map((entity) => entity.id),
-      pathLength: Math.max(...plannedMoves.map((move) => move.path.length)),
+      entityIds: routedBoats.map((entity) => entity.id),
+      pathLength: longestPath,
     },
   };
 }

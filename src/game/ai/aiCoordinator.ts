@@ -97,11 +97,11 @@ export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
     changed = input.buildDock() || changed;
   }
 
-  if (!rebuildChanged && !changed) {
+  if (!rebuildChanged && !input.state.openingComplete) {
     changed = runAiOpeningPlan(input) || changed;
   }
 
-  if (!rebuildChanged && !changed) {
+  if (!rebuildChanged && input.state.openingComplete && !changed) {
     const factoryProduct = !input.state.productionQueued
       ? chooseAiFactoryProduction({
           strategy: input.state.strategy,

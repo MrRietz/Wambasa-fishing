@@ -246,7 +246,7 @@ export function renderDockCommandPanel(
   elements.dockCommandsElement.hidden = !dock;
   const queue = dock?.economy?.productionQueue ?? [];
   renderProductionQueueReadout(elements.dockProductionElement, queue, 'Dock queue empty');
-  syncProductionButton(elements.boatButtonElement, 'Fish Boat', productionCatalog.boat, economy, crew);
+  syncProductionButton(elements.boatButtonElement, 'Fishing Boat', productionCatalog.boat, economy, crew);
   elements.boatButtonElement.disabled = !dock || !canAffordProduction(economy, productionCatalog.boat, crew);
   syncProductionButton(elements.attackBoatButtonElement, 'Attack Boat', productionCatalog.attackBoat, economy, crew);
   elements.attackBoatButtonElement.disabled = !dock || !canAffordProduction(economy, productionCatalog.attackBoat, crew);
@@ -739,7 +739,7 @@ function shortProductionLabel(product: ProductionKind): string {
     case 'truck':
       return 'Truck';
     case 'boat':
-      return 'Fish Boat';
+      return 'Fishing Boat';
     case 'attackBoat':
       return 'Attack Boat';
   }

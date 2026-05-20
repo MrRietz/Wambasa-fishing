@@ -1,4 +1,4 @@
-import { Graphics, Sprite } from 'pixi.js';
+import { Container, Graphics, Sprite } from 'pixi.js';
 import { getUnitAnimationDefinition, isHumanoidAnimationUnit, resolveUnitAnimationPose } from '../art/unitAnimationManifest';
 import { getBuildingSpriteTexture, getEffectSpriteTexture, getUnitSpriteTexture, resolveSpriteFacingPresentation } from '../art/unitSpriteAssets';
 import { clamp } from '../core/math';
@@ -20,7 +20,7 @@ export function renderEntityLayers(layers: RenderLayers, context: EntityRenderCo
 }
 
 export function renderBuildings(layers: RenderLayers, context: EntityRenderContext): void {
-  layers.buildings.removeChildren();
+  clearLayerChildren(layers.buildings);
   for (const entity of context.entities) {
     if (entity.renderable.hidden || entity.renderable.layer !== 'buildings' || context.getDamageState(entity) === 'destroyed') {
       continue;
@@ -36,7 +36,7 @@ export function renderBuildings(layers: RenderLayers, context: EntityRenderConte
 }
 
 export function renderUnits(layers: RenderLayers, context: EntityRenderContext): void {
-  layers.units.removeChildren();
+  clearLayerChildren(layers.units);
   for (const entity of context.entities) {
     if (entity.renderable.hidden || entity.renderable.layer !== 'units' || context.getDamageState(entity) === 'destroyed') {
       continue;
@@ -52,7 +52,7 @@ export function renderUnits(layers: RenderLayers, context: EntityRenderContext):
 }
 
 export function renderEffects(layers: RenderLayers, context: EntityRenderContext): void {
-  layers.effects.removeChildren();
+  clearLayerChildren(layers.effects);
   for (const entity of context.entities) {
     if (entity.renderable.hidden) {
       continue;
@@ -64,6 +64,12 @@ export function renderEffects(layers: RenderLayers, context: EntityRenderContext
   const overlay = new Graphics({ label: 'combat-indicators' });
   drawCombatIndicators(overlay, context);
   layers.effects.addChild(overlay);
+}
+
+function clearLayerChildren(layer: Container): void {
+  for (const child of layer.removeChildren()) {
+    child.destroy({ children: true });
+  }
 }
 
 const buildingSpritePresentation: Partial<Record<GameEntity['kind'], {
@@ -119,7 +125,7 @@ const buildingSpritePresentation: Partial<Record<GameEntity['kind'], {
 
 function createUnitSprite(entity: GameEntity): Sprite | undefined {
   const direction = entity.animation.direction ?? 'south';
-  const texture = getUnitSpriteTexture(entity.kind, entity.animation.state, direction, entity.animation.frame);
+  const texture = getUnitSpriteTexture(entity.kind, entity.animation.state, direction, entity.animation.frame, entity.economy?.combatRole);
   if (!texture) return undefined;
   const sprite = new Sprite({ texture, label: `entity-${entity.id}` });
   sprite.anchor.set(0.5, 0.82);

@@ -50,7 +50,9 @@ const terrainAnimationStates = new WeakMap<Container, TerrainAnimationState>();
 
 export function renderTerrainMap(input: TerrainRenderInput): void {
   const { layers, mapData, resourceFields, fishingZones } = input;
-  layers.terrain.removeChildren();
+  for (const child of layers.terrain.removeChildren()) {
+    child.destroy({ children: true });
+  }
   const animationState: TerrainAnimationState = {
     waterSprites: [],
     shorelineSprites: [],
