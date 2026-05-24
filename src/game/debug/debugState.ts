@@ -151,8 +151,14 @@ export interface RtsDebugState {
     cash: number;
     baseArea?: RectData & { owner: 'player' | 'enemy' | 'neutral' };
     unitIds: string[];
+    visibleUnitIds: string[];
+    hiddenByFogUnitCount: number;
     commandCenterId?: string;
     lastAction?: string;
+    openingComplete?: boolean;
+    tickCount?: number;
+    lastTickDeltaSeconds?: number;
+    raidDelaySeconds?: number;
     tactic?: AiTactic;
     tacticLabel?: string;
     tacticReason?: string;

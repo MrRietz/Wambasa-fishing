@@ -146,8 +146,14 @@ type RtsDebugState = {
     cash: number;
     baseArea?: { id: string; owner: string; x: number; y: number; width: number; height: number };
     unitIds: string[];
+    visibleUnitIds: string[];
+    hiddenByFogUnitCount: number;
     commandCenterId?: string;
     lastAction?: string;
+    openingComplete?: boolean;
+    tickCount?: number;
+    lastTickDeltaSeconds?: number;
+    raidDelaySeconds?: number;
     lastProductionEvent?: {
       kind: 'queued' | 'spawned';
       product: 'worker' | 'guard' | 'saboteur' | 'truck' | 'boat' | 'attackBoat';
@@ -1858,6 +1864,41 @@ test.describe('Epic 6 AI rival foundation', () => {
         cargo: { kind: 'metal', amount: 0, capacity: 100 },
       }),
     );
+  });
+
+  test('AI rival keeps simulating production and economy while hidden by fog', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Start Skirmish Shell' }).click();
+
+    await page.waitForFunction(
+      () => {
+        const ai = window.__wambasaRts?.ai;
+        return Boolean(ai && (ai.hiddenByFogUnitCount ?? 0) > 0 && !(ai.visibleUnitIds ?? []).includes('enemy-factory'));
+      },
+      null,
+      { timeout: 5000 },
+    );
+    const hiddenStart = await getDebugState(page);
+    const startTickCount = hiddenStart.ai.tickCount ?? 0;
+    const startHiddenCount = hiddenStart.ai.hiddenByFogUnitCount;
+    const startRaidDelaySeconds = hiddenStart.ai.raidDelaySeconds ?? Infinity;
+    expect(hiddenStart.ai.hiddenByFogUnitCount).toBeGreaterThan(0);
+    expect(hiddenStart.ai.visibleUnitIds).not.toContain('enemy-factory');
+
+    await page.waitForFunction(
+      ({ startTickCount, startHiddenCount }) =>
+        (window.__wambasaRts?.ai.tickCount ?? 0) >= startTickCount + 2 &&
+        (window.__wambasaRts?.ai.hiddenByFogUnitCount ?? 0) > startHiddenCount,
+      { startTickCount, startHiddenCount },
+      { timeout: 22000 },
+    );
+
+    const hiddenAfter = await getDebugState(page);
+    expect(hiddenAfter.ai.tickCount ?? 0).toBeGreaterThanOrEqual(startTickCount + 2);
+    expect(hiddenAfter.ai.hiddenByFogUnitCount).toBeGreaterThan(startHiddenCount);
+    expect(hiddenAfter.ai.lastAction).toBeTruthy();
+    expect(hiddenAfter.ai.raidDelaySeconds ?? Infinity).toBeLessThan(startRaidDelaySeconds);
+    expect(hiddenAfter.ai.visibleUnitIds).not.toContain('enemy-factory');
   });
 
   test('AI rival rebuilds a destroyed metal hauler through normal production', async ({ page }) => {

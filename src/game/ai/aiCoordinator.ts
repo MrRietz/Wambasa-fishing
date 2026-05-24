@@ -26,6 +26,8 @@ export interface AiControllerState {
   activeTerritoryThreatId?: string;
   lastAction: string;
   raidCount: number;
+  tickCount?: number;
+  lastTickDeltaSeconds?: number;
   lastProductionEvent?: RtsDebugState['ai']['lastProductionEvent'];
   lastResourceEvent?: RtsDebugState['ai']['lastResourceEvent'];
   lastRaidEvent?: RtsDebugState['ai']['lastRaidEvent'];
@@ -53,6 +55,8 @@ export interface AiCoordinatorInput {
 
 export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
   let changed = false;
+  input.state.tickCount = (input.state.tickCount ?? 0) + 1;
+  input.state.lastTickDeltaSeconds = input.deltaSeconds;
   if (input.state.startDelaySeconds > 0) {
     input.state.startDelaySeconds = Math.max(0, input.state.startDelaySeconds - input.deltaSeconds);
     return false;

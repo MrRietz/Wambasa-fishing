@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const localChromium = 'C:\\Users\\rietzr\\AppData\\Local\\ms-playwright\\chromium-1217\\chrome-win64\\chrome.exe';
+const chromiumLaunchOptions = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+  ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
+  : undefined;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -17,9 +19,7 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        launchOptions: {
-          executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || localChromium
-        }
+        launchOptions: chromiumLaunchOptions
       }
     },
     {

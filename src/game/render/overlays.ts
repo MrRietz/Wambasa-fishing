@@ -133,9 +133,15 @@ export function drawDestinationOverlay(
   }
 
   const { x, y } = lastMoveCommand;
-  for (const entityId of lastMoveCommand.entityIds) {
-    const entity = entities.find((candidate) => candidate.id === entityId);
-    if (!entity || entity.path.length === 0) {
+  const commandEntities = lastMoveCommand.entityIds
+    .map((entityId) => entities.find((candidate) => candidate.id === entityId))
+    .filter((entity): entity is GameEntity => Boolean(entity));
+  if (commandEntities.length === 0) {
+    return;
+  }
+
+  for (const entity of commandEntities) {
+    if (entity.path.length === 0) {
       continue;
     }
     overlay.moveTo(entity.x, entity.y);

@@ -757,13 +757,20 @@ function syncAnimationIdentities(): void {
 
 function getAiDebugState(): RtsDebugState['ai'] {
   const enemyUnits = entities.filter((entity) => entity.faction === 'enemy');
+  const visibleEnemyUnits = enemyUnits.filter((entity) => isEntityVisible(visibilityState, entity));
   return {
     metal: aiEconomyState.metal,
     cash: aiEconomyState.cash,
     baseArea: mapData.baseAreas.find((area) => area.owner === 'enemy'),
     unitIds: enemyUnits.map((entity) => entity.id),
+    visibleUnitIds: visibleEnemyUnits.map((entity) => entity.id),
+    hiddenByFogUnitCount: enemyUnits.length - visibleEnemyUnits.length,
     commandCenterId: enemyUnits.find((entity) => entity.kind === 'enemyFactory')?.id,
     lastAction: aiController.lastAction,
+    openingComplete: aiController.openingComplete,
+    tickCount: aiController.tickCount,
+    lastTickDeltaSeconds: aiController.lastTickDeltaSeconds,
+    raidDelaySeconds: aiController.raidDelaySeconds,
     tactic: aiController.activeTactic,
     tacticLabel: aiController.activeTactic ? getAiTacticLabel(aiController.activeTactic) : undefined,
     tacticReason: aiController.intel?.tacticReason,
@@ -1018,7 +1025,7 @@ function drawCombatTargetingOverlay(layers: RenderLayers): void {
 }
 
 function drawDestinationOverlay(layers: RenderLayers): void {
-  drawDestinationOverlayForRender(layers, entities, lastMoveCommand);
+  drawDestinationOverlayForRender(layers, entities.filter((entity) => entity.faction === 'player' || isEntityVisible(visibilityState, entity)), lastMoveCommand);
 }
 
 function drawPlacementPreview(layers: RenderLayers): void {
@@ -4854,6 +4861,7 @@ function installCameraControls(app: Application, layers: RenderLayers): void {
       evaluateMatchEnd(layers);
       updateAnimationStates(deltaSeconds, layers);
       updateFogOfWarThrottled(deltaSeconds, layers);
+      publishDebugStateForSimulationTick(layers);
     }
 
     const scrollSpeedMultiplier = playerSettings.scrollSpeed / 100;

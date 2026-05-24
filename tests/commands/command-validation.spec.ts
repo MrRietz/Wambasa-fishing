@@ -990,6 +990,99 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'AI tick telemetry advances even while start delay blocks actions',
+    run: () => {
+      const state = makeAiControllerState({
+        startDelaySeconds: 0.3,
+        harvestIssued: false,
+      });
+      const changed = tickAiCoordinator({
+        deltaSeconds: 0.1,
+        state,
+        entities: [],
+        availableMetal: 0,
+        availableCash: 0,
+        getDamageState: () => 'healthy',
+        tryIssueHarvest: () => {
+          throw new Error('AI should not issue harvest during start delay.');
+        },
+        queueProduction: () => false,
+        buildDock: () => false,
+        buildBarracks: () => false,
+        updateProduction: () => false,
+        updateFishing: () => false,
+        updateBoatRepair: () => false,
+        respondToThreat: () => false,
+        issueRaid: () => false,
+        updateRaid: () => false,
+      });
+
+      assert.equal(changed, false);
+      assert.equal(state.tickCount, 1);
+      assert.equal(state.lastTickDeltaSeconds, 0.1);
+      assert.ok(Math.abs(state.startDelaySeconds - 0.2) < 0.0001);
+    },
+  },
+  {
+    name: 'AI coordinator keeps economy and raid systems ticking for render-hidden enemy assets',
+    run: () => {
+      const state = makeAiControllerState({
+        openingComplete: true,
+        harvestIssued: false,
+        productionQueued: true,
+        dockBuilt: true,
+        boatProductionQueued: true,
+        raidDelaySeconds: 0,
+      });
+      const calls = {
+        harvest: 0,
+        production: 0,
+        fishing: 0,
+        raid: 0,
+      };
+      const changed = tickAiCoordinator({
+        deltaSeconds: 0.1,
+        state,
+        entities: [
+          makeEntity({ id: 'enemy-factory', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 1200 }, hidden: true }),
+          makeEntity({ id: 'enemy-dock', kind: 'dock', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 800 }, hidden: true }),
+          makeEntity({ id: 'enemy-truck-1', kind: 'truck', faction: 'enemy', hidden: true }),
+          makeEntity({ id: 'enemy-boat-1', kind: 'boat', faction: 'enemy', hidden: true }),
+          makeEntity({ id: 'enemy-guard-1', kind: 'guard', faction: 'enemy', hidden: true }),
+        ],
+        availableMetal: 80,
+        availableCash: 80,
+        getDamageState: () => 'healthy',
+        tryIssueHarvest: () => {
+          calls.harvest += 1;
+          return false;
+        },
+        queueProduction: () => false,
+        buildDock: () => false,
+        buildBarracks: () => false,
+        updateProduction: () => {
+          calls.production += 1;
+          return false;
+        },
+        updateFishing: () => {
+          calls.fishing += 1;
+          return false;
+        },
+        updateBoatRepair: () => false,
+        respondToThreat: () => false,
+        issueRaid: () => {
+          calls.raid += 1;
+          return true;
+        },
+        updateRaid: () => false,
+      });
+
+      assert.equal(changed, true);
+      assert.deepEqual(calls, { harvest: 1, production: 1, fishing: 1, raid: 1 });
+      assert.equal(state.tickCount, 1);
+    },
+  },
+  {
     name: 'AI builds barracks fallback when no barracks exists',
     run: () => {
       const state = makeAiControllerState({
