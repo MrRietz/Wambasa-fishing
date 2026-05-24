@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 4-6-repair-buildings
 epic: 4
 story: 6
@@ -46,6 +46,8 @@ So that recovery is possible after attacks.
 - Existing worker repair commands already support friendly buildings with missing health.
 - Added deterministic internal damage hook for e2e setup and covered Factory repair flow.
 - Validation passed: `npm run typecheck`, focused building repair e2e, `npm run build`, full `npm run e2e`.
+- 2026-05-24 close-pass: recalibrated the focused repair e2e damage amount for the current 1500 HP Factory so visual damage feedback is asserted in the damaged band.
+- 2026-05-24 close-pass validation passed: `npm run typecheck`, `npm run test:commands`, focused building repair e2e, `npm run build`.
 
 ### Completion Notes
 
@@ -61,3 +63,11 @@ Workers can now be regression-tested repairing damaged friendly buildings. The t
 ## Change Log
 
 - 2026-05-16: Added building repair regression coverage and deterministic test damage hook.
+- 2026-05-24: Calibrated the repair regression setup against current Factory health and revalidated.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Verified building repair flow and calibrated damage-feedback regression setup.

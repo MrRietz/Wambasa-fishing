@@ -1,4 +1,4 @@
-import { WORLD_HEIGHT, WORLD_WIDTH } from '../../config/constants';
+import { FIRST_SKIRMISH_COMBAT_PRESSURE, WORLD_HEIGHT, WORLD_WIDTH } from '../../config/constants';
 import { clamp } from '../../core/math';
 import type { DamageState, GameEntity } from '../../entities/components';
 
@@ -51,12 +51,12 @@ export interface AutoDefenseSystemInput {
   getCollisionRadius: (entity: GameEntity) => number;
 }
 
-const GUARD_ATTACK_DAMAGE_PER_SECOND = 48;
-const GUARD_LAND_ATTACK_RANGE = 64;
-const GUARD_BOAT_ATTACK_RANGE = 92;
-const ATTACK_BOAT_DAMAGE_PER_SECOND = 34;
-const ATTACK_BOAT_RANGE = 88;
-const DEFAULT_GUARD_ENGAGE_RANGE = 150;
+const GUARD_ATTACK_DAMAGE_PER_SECOND = FIRST_SKIRMISH_COMBAT_PRESSURE.guardDamagePerSecond;
+const GUARD_LAND_ATTACK_RANGE = FIRST_SKIRMISH_COMBAT_PRESSURE.guardLandAttackRange;
+const GUARD_BOAT_ATTACK_RANGE = FIRST_SKIRMISH_COMBAT_PRESSURE.guardBoatAttackRange;
+const ATTACK_BOAT_DAMAGE_PER_SECOND = FIRST_SKIRMISH_COMBAT_PRESSURE.attackBoatDamagePerSecond;
+const ATTACK_BOAT_RANGE = FIRST_SKIRMISH_COMBAT_PRESSURE.attackBoatRange;
+const DEFAULT_GUARD_ENGAGE_RANGE = FIRST_SKIRMISH_COMBAT_PRESSURE.defaultGuardEngageRange;
 
 function getEdgeDistance(attacker: GameEntity, target: GameEntity, getCollisionRadius: (entity: GameEntity) => number): number {
   return Math.max(0, Math.hypot(attacker.x - target.x, attacker.y - target.y) - getCollisionRadius(attacker) - getCollisionRadius(target));

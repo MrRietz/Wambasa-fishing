@@ -21,6 +21,7 @@ import type { RenderPolishState } from '../render/renderPolishState';
 import { getRenderPolishState } from '../render/renderPolishState';
 import type { PlayerSettings } from '../settings/playerSettings';
 import type { AiObservedPlayerState, AiTactic } from '../ai/aiIntelSystem';
+import type { FIRST_SKIRMISH_COMBAT_PRESSURE } from '../config/constants';
 
 export type AlertSeverity = 'info' | 'success' | 'warning' | 'error';
 export type ObjectiveId = 'select' | 'harvest' | 'dock' | 'boat' | 'fish' | 'defense' | 'win';
@@ -35,6 +36,7 @@ export interface BalanceDebugState {
   aiFirstRaidGraceSeconds: number;
   starterMetalCargo: number;
   firstBoatCashValue: number;
+  combatPressure: typeof FIRST_SKIRMISH_COMBAT_PRESSURE;
 }
 
 export interface CameraState {
@@ -86,7 +88,7 @@ export interface RtsDebugState {
     dropOff?: ResourceKind[];
     health?: number;
     damageState?: DamageState;
-    harvesting?: { fieldId?: string; phase: 'to-field' | 'loading' | 'returning' | 'manual-returning'; remainingSeconds?: number };
+    harvesting?: NonNullable<GameEntity['economy']>['harvesting'];
     fishing?: { zoneId: string; phase: 'to-zone' | 'fishing' };
     shoreFishing?: { zoneId: string; phase: 'to-shore' | 'fishing'; catchCooldownSeconds?: number };
     unloadingFish?: { targetId: string; phase: 'to-dock' | 'to-bank' };
@@ -124,6 +126,14 @@ export interface RtsDebugState {
     targetId: string;
     kind: 'attacking' | 'damaged' | 'destroyed';
     targetHealth?: number;
+  };
+  lastCrushEvent?: {
+    truckId: string;
+    targetId: string;
+    targetHealth: number;
+    faction: Faction;
+    x: number;
+    y: number;
   };
   lastSabotageEvent?: {
     saboteurId: string;
@@ -273,6 +283,7 @@ export interface DebugSnapshotInput {
   lastMoveCommand?: RtsDebugState['lastMoveCommand'];
   lastCommandResult?: CommandResult;
   lastCombatEvent?: RtsDebugState['lastCombatEvent'];
+  lastCrushEvent?: RtsDebugState['lastCrushEvent'];
   lastSabotageEvent?: RtsDebugState['lastSabotageEvent'];
   lastRepairEvent?: RtsDebugState['lastRepairEvent'];
   collision: RtsDebugState['collision'];
@@ -363,6 +374,7 @@ export function createDebugSnapshot(input: DebugSnapshotInput): RtsDebugState {
     lastMoveCommand: input.lastMoveCommand,
     lastCommandResult: input.lastCommandResult,
     lastCombatEvent: input.lastCombatEvent,
+    lastCrushEvent: input.lastCrushEvent,
     lastSabotageEvent: input.lastSabotageEvent,
     lastRepairEvent: input.lastRepairEvent,
     collision: input.collision,

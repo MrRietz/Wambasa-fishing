@@ -11,6 +11,7 @@ export interface EntityRenderContext {
   entities: GameEntity[];
   getDamageState: (entity: GameEntity) => DamageState | undefined;
   getMaxHealth: (entity: GameEntity) => number;
+  crushEffects?: Array<{ x: number; y: number; ageSeconds: number; durationSeconds: number }>;
 }
 
 export function renderEntityLayers(layers: RenderLayers, context: EntityRenderContext): void {
@@ -63,6 +64,7 @@ export function renderEffects(layers: RenderLayers, context: EntityRenderContext
   }
   const overlay = new Graphics({ label: 'combat-indicators' });
   drawCombatIndicators(overlay, context);
+  drawCrushEffects(overlay, context);
   layers.effects.addChild(overlay);
 }
 
@@ -845,6 +847,17 @@ function drawCombatIndicators(graphic: Graphics, context: EntityRenderContext): 
       width: 2.5,
       alpha: 0.38 + pulse * 0.16,
     });
+  }
+}
+
+function drawCrushEffects(graphic: Graphics, context: EntityRenderContext): void {
+  for (const effect of context.crushEffects ?? []) {
+    const progress = clamp(effect.ageSeconds / effect.durationSeconds, 0, 1);
+    const alpha = Math.max(0, 1 - progress);
+    const radius = 14 + progress * 34;
+    graphic.circle(effect.x, effect.y, radius).stroke({ color: 0xffd166, width: 4, alpha: 0.48 * alpha });
+    graphic.circle(effect.x, effect.y, 6 + progress * 10).fill({ color: 0xff6d4a, alpha: 0.42 * alpha });
+    graphic.rect(effect.x - 26, effect.y + 15 + progress * 6, 52, 7).fill({ color: 0x1b1614, alpha: 0.36 * alpha });
   }
 }
 

@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 8-4-add-audio-unlock-music-and-sfx-buses
 epic: 8
 story: 4
@@ -63,3 +63,10 @@ Audio now unlocks from a user gesture, starts a music loop when supported, expos
 ## Change Log
 
 - 2026-05-16: Implemented Story 8.4 Web Audio unlock, music loop, SFX buses, and tests.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Verified Web Audio unlock and bus debug state with focused audio e2e plus typecheck.

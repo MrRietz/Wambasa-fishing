@@ -9,7 +9,7 @@ type DestinationValidator = (worldX: number, worldY: number) => boolean;
 export function getDockSpawnPoint(dock: GameEntity, isValidWaterDestination: DestinationValidator): Point {
   return findNearestWaterPoint(dock.x, dock.y, getDockProbeRadii(dock), isValidWaterDestination, {
     x: clamp(dock.x, 60, WORLD_WIDTH - 60),
-    y: clamp(dock.y - 128, 60, WORLD_HEIGHT - 60),
+    y: clamp(dock.y - 78, 60, WORLD_HEIGHT - 60),
   });
 }
 
@@ -21,7 +21,7 @@ export function getFishingInteractionPoint(zone: FishingZoneData, isValidWaterDe
 }
 
 export function getWorkerFishingPoint(zone: FishingZoneData, isValidLandDestination: DestinationValidator): Point {
-  return findNearestLandPoint(zone.x, zone.y, [zone.radius + 18, zone.radius + 42, zone.radius + 74], isValidLandDestination, {
+  return findNearestLandPoint(zone.x, zone.y, [zone.radius + 18, zone.radius + 42, zone.radius + 74, zone.radius + 154], isValidLandDestination, {
     x: clamp(zone.x, 120, WORLD_WIDTH - 120),
     y: clamp(zone.y + zone.radius + 32, 120, WORLD_HEIGHT - 120),
   });
@@ -38,7 +38,7 @@ export function getDockLandDropOffPoint(dock: GameEntity, isValidLandDestination
 export function getDockUnloadPoint(dock: GameEntity, isValidWaterDestination: DestinationValidator): Point {
   return findNearestWaterPoint(dock.x, dock.y, getDockProbeRadii(dock), isValidWaterDestination, {
     x: dock.x,
-    y: clamp(dock.y - 104, 60, WORLD_HEIGHT - 60),
+    y: clamp(dock.y - 82, 60, WORLD_HEIGHT - 60),
   });
 }
 

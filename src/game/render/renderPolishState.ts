@@ -34,7 +34,7 @@ export function getRenderPolishState(entity: GameEntity, getDamageState: (entity
 
   return {
     hasWheelMotion: entity.kind === 'truck' && isMovingVehicle && damageState !== 'destroyed',
-    hasCargoLoad: entity.kind === 'truck' && Boolean(cargo && cargo.amount > 0) && damageState !== 'destroyed',
+    hasCargoLoad: (entity.kind === 'truck' || entity.kind === 'boat') && Boolean(cargo && cargo.amount > 0) && damageState !== 'destroyed',
     hasWake: entity.kind === 'boat' && isMovingVehicle && damageState !== 'destroyed',
     hasProductionActivity: productionQueue.length > 0 && damageState !== 'destroyed',
     hasReelWorkshopActivity: Boolean(reelWorkshop && reelWorkshop.reelProgressSeconds > 0) && damageState !== 'destroyed',
@@ -42,7 +42,7 @@ export function getRenderPolishState(entity: GameEntity, getDamageState: (entity
     hasDamageSmoke: damageState === 'damaged' || damageState === 'critical' || damageState === 'destroyed',
     hasDisabledPulse: (entity.economy?.disabledSeconds ?? 0) > 0 && damageState !== 'destroyed',
     hasAttackCharge: Boolean(entity.economy?.attack) && damageState !== 'destroyed',
-    hasFishingRipple: entity.kind === 'boat' && entity.animation.state === 'fish' && damageState !== 'destroyed',
+    hasFishingRipple: entity.kind === 'boat' && (entity.animation.state === 'fish' || entity.animation.state === 'unload') && damageState !== 'destroyed',
     hasCriticalGlow: damageState === 'critical' || damageState === 'destroyed',
     constructionProgress: construction ? clamp(construction.progressSeconds / construction.totalSeconds, 0, 1) : undefined,
     reelWorkshopProgress: reelWorkshop ? clamp(reelWorkshop.reelProgressSeconds / REEL_BUILD_SECONDS, 0, 1) : undefined,

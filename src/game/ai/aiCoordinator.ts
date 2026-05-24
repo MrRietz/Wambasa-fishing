@@ -255,12 +255,11 @@ function getAiOpeningPlan(strategy: AiStrategy): AiOpeningStep[] {
         { item: 'worker', targetCount: 3 },
         { item: 'truck', targetCount: 1 },
         { item: 'barracks', targetCount: 1 },
-        { item: 'guard', targetCount: 1 },
+        { item: 'guard', targetCount: 2 },
         { item: 'dock', targetCount: 1 },
         { item: 'boat', targetCount: 1 },
         { item: 'truck', targetCount: 2 },
         { item: 'boat', targetCount: 2 },
-        { item: 'guard', targetCount: 2 },
       ];
     case 'harborPressure':
       return [
@@ -268,10 +267,9 @@ function getAiOpeningPlan(strategy: AiStrategy): AiOpeningStep[] {
         { item: 'truck', targetCount: 1 },
         { item: 'dock', targetCount: 1 },
         { item: 'barracks', targetCount: 1 },
-        { item: 'guard', targetCount: 1 },
+        { item: 'guard', targetCount: 2 },
         { item: 'boat', targetCount: 1 },
         { item: 'attackBoat', targetCount: 1 },
-        { item: 'guard', targetCount: 2 },
       ];
     case 'siege':
     default:

@@ -1,5 +1,5 @@
 # generated: 2026-05-16T00:00:00+02:00
-# last_updated: 2026-05-24T00:00:00+02:00
+# last_updated: 2026-05-24T12:00:00+02:00
 # project: Wambasa-fishing
 # project_key: NOKEY
 # tracking_system: file-system
@@ -24,7 +24,7 @@
 #   - done: Retrospective has been completed
 
 generated: 2026-05-16T00:00:00+02:00
-last_updated: 2026-05-24T00:00:00+02:00
+last_updated: 2026-05-24T12:00:00+02:00
 project: Wambasa-fishing
 project_key: NOKEY
 tracking_system: file-system
@@ -111,16 +111,18 @@ development_status:
   9-3-add-match-restart-and-results-summary: done
   9-4-performance-and-browser-compatibility-pass: done
   9-5-mvp-regression-test-suite: done
+  9-6-increase-enemy-pressure-and-tune-guard-damage: ready-for-review
   epic-9-retrospective: optional
 
   epic-10: in-progress
   10-1-ai-acts-while-under-fog: review
-  10-2-trucks-crush-human-units: ready-for-dev
-  10-3-building-adjacent-pathing-and-stuck-recovery: ready-for-dev
-  10-4-sell-buildings-command: ready-for-dev
-  10-5-1080p-menu-and-ui-scale-pass: ready-for-dev
-  10-6-save-and-load-from-f10-menu: ready-for-dev
-  10-7-fishermen-and-boat-animation-polish: ready-for-dev
+  10-2-trucks-crush-human-units: done
+  10-3-building-adjacent-pathing-and-stuck-recovery: done
+  10-4-sell-buildings-command: done
+  10-5-1080p-menu-and-ui-scale-pass: done
+  10-6-save-and-load-from-f10-menu: done
+  10-7-fishermen-and-boat-animation-polish: done
+  10-8-truck-auto-harvest-reliability: done
   epic-10-retrospective: optional
 
   epic-11: in-progress

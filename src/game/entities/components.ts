@@ -55,7 +55,14 @@ export interface GameEntity {
     cargo?: { kind: ResourceKind; amount: number; capacity: number };
     reelEquipped?: boolean;
     combatRole?: 'fishing' | 'attack';
-    harvesting?: { fieldId?: string; phase: 'to-field' | 'loading' | 'returning' | 'manual-returning'; remainingSeconds?: number };
+    harvesting?: {
+      fieldId?: string;
+      phase: 'to-field' | 'loading' | 'returning' | 'manual-returning' | 'return-blocked' | 'field-blocked';
+      remainingSeconds?: number;
+      retrySeconds?: number;
+      lastBlockedReason?: 'factory-route' | 'field-route';
+      lastStopReason?: 'manual' | 'field-depleted' | 'invalid-state';
+    };
     fishing?: { zoneId: string; phase: 'to-zone' | 'fishing' };
     shoreFishing?: { zoneId: string; phase: 'to-shore' | 'fishing'; catchCooldownSeconds?: number };
     unloadingFish?: { targetId: string; phase: 'to-dock' | 'to-bank' };

@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 7-7-defensive-buildings-auto-engage-raiders
 epic: 7
 story: 7
@@ -49,6 +49,8 @@ So that base layout and defensive investment matter.
 - Added Guard Tower range/DPS constants, auto-acquisition, immobile combat handling, range overlay, target readout, attack beam rendering, and e2e coverage.
 - Fixed test brittleness after towers reacquired a second target following skiff destruction.
 - Validation passed: `npm run typecheck`, `npm run build`, focused Guard Tower e2e, full `npm run e2e`.
+- 2026-05-24 close-pass: restored deterministic forced starter-raider fallback for the debug raid hook, selected the completed tower before refreshing the raid, and exposed Guard Tower range in the selection stat rows.
+- 2026-05-24 close-pass validation passed: `npm run typecheck`, focused Guard Tower e2e, `npm run build`.
 
 ### Completion Notes
 
@@ -64,3 +66,11 @@ Completed Guard Towers now automatically acquire enemy entities in range, apply 
 ## Change Log
 
 - 2026-05-16: Implemented Story 7.7 Guard Tower auto-defense behavior and tests.
+- 2026-05-24: Stabilized Guard Tower auto-defense regression and selection range feedback.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Verified and stabilized Guard Tower auto-defense regression and selection range feedback.

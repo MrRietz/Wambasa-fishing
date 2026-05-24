@@ -9,6 +9,7 @@ import {
   renderDockCommandPanel,
   renderEconomyReadout,
   renderBarracksCommandPanel,
+  renderBuildingCommandPanel,
   renderFactoryCommandPanel,
   renderMatchResultPanel,
   renderObjectiveList,
@@ -48,6 +49,7 @@ export interface HudSelectionRenderInput extends HudPresentationInput {
   selectedDock: GameEntity | null;
   selectedBarracks: GameEntity | null;
   selectedTechLab: GameEntity | null;
+  selectedBuilding: GameEntity | null;
   selectedWorkerCount: number;
   selectedFactoryCrewCount: number;
   selectedFactoryReleaseCount: number;
@@ -62,6 +64,7 @@ export interface HudEconomyRenderInput {
   selectedDock: GameEntity | null;
   selectedBarracks: GameEntity | null;
   selectedTechLab: GameEntity | null;
+  selectedBuilding: GameEntity | null;
   selectedWorkerCount: number;
   selectedFactoryCrewCount: number;
   selectedFactoryReleaseCount: number;
@@ -259,6 +262,8 @@ export function createHudPresenter(
     | 'workerBuildDetailsElement'
     | 'placementElement'
     | 'tacticalCommandsElement'
+    | 'buildingCommandsElement'
+    | 'sellBuildingButtonElement'
     | 'stopButtonElement'
     | 'attackButtonElement'
     | 'holdButtonElement'
@@ -380,6 +385,14 @@ export function createHudPresenter(
       },
       input.selected,
     );
+    renderBuildingCommandPanel(
+      {
+        buildingCommandsElement: elements.buildingCommandsElement,
+        sellBuildingButtonElement: elements.sellBuildingButtonElement,
+      },
+      input.selectedBuilding,
+      input.getDamageState,
+    );
   }
 
   function renderEconomy(input: HudEconomyRenderInput): void {
@@ -457,6 +470,14 @@ export function createHudPresenter(
       },
       input.selectedTechLab,
       input.economy,
+    );
+    renderBuildingCommandPanel(
+      {
+        buildingCommandsElement: elements.buildingCommandsElement,
+        sellBuildingButtonElement: elements.sellBuildingButtonElement,
+      },
+      input.selectedBuilding,
+      () => undefined,
     );
   }
 

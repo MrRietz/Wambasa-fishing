@@ -24,6 +24,11 @@ export interface RtsDomElements {
   scrollSpeedReadoutElement: HTMLSpanElement;
   edgeScrollToggleElement: HTMLInputElement;
   difficultySelectElement: HTMLSelectElement;
+  saveGameButtonElement: HTMLButtonElement;
+  loadGameButtonElement: HTMLButtonElement;
+  exportSaveButtonElement: HTMLButtonElement;
+  importSaveButtonElement: HTMLButtonElement;
+  importSaveInputElement: HTMLInputElement;
   factoryCommandsElement: HTMLDivElement;
   workerButtonElement: HTMLButtonElement;
   truckButtonElement: HTMLButtonElement;
@@ -61,6 +66,8 @@ export interface RtsDomElements {
   workerBuildDetailsElement: HTMLDivElement;
   placementElement: HTMLDivElement;
   tacticalCommandsElement: HTMLDivElement;
+  buildingCommandsElement: HTMLDivElement;
+  sellBuildingButtonElement: HTMLButtonElement;
   stopButtonElement: HTMLButtonElement;
   attackButtonElement: HTMLButtonElement;
   holdButtonElement: HTMLButtonElement;
@@ -88,12 +95,13 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
       <div class="rts-loading-screen" aria-live="polite" aria-busy="true">
         <div class="rts-loading-panel">
           <div class="rts-loading-title">Wambasa Fishing Wars</div>
-          <p id="boot-status">Loading PixiJS command shell...</p>
+          <p id="loading-status">Loading PixiJS command shell...</p>
           <div class="rts-loading-meter" aria-hidden="true"><span></span></div>
         </div>
       </div>
       <main id="rts-game" class="rts-game" aria-label="RTS game viewport" tabindex="0">
         <div id="viewport-hud" class="rts-viewport-hud" aria-hidden="true">
+          <div id="boot-status" class="rts-viewport-mode">Loading PixiJS command shell...</div>
           <div id="viewport-mode-readout" class="rts-viewport-mode">Command online</div>
           <div id="viewport-selection-readout" class="rts-viewport-selection">No unit selected</div>
           <div id="viewport-hotkey-readout" class="rts-viewport-hotkeys">LMB Select | RMB Order | A Attack-Move | T Attack | H Hold | S Stop</div>
@@ -123,6 +131,13 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
             <option value="normal" selected>Normal</option>
             <option value="hard">Hard</option>
           </select>
+          <div class="rts-save-actions" aria-label="Save game controls">
+            <button id="save-game-button" class="rts-secondary" type="button">Save</button>
+            <button id="load-game-button" class="rts-secondary" type="button">Load</button>
+            <button id="export-save-button" class="rts-secondary" type="button">Export</button>
+            <button id="import-save-button" class="rts-secondary" type="button">Import</button>
+            <input id="import-save-input" class="rts-visually-hidden" type="file" accept="application/json,.json" />
+          </div>
         </div>
       </section>
       <aside class="rts-side-panel" aria-live="polite">
@@ -201,6 +216,10 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
               <button id="hold-command-button" data-command-icon="HD" data-command-tone="combat" type="button" aria-label="Hold Position (H)">Hold<br><span>H</span></button>
               <button id="attack-move-command-button" data-command-icon="AM" data-command-tone="combat" type="button" aria-label="Attack-Move (A)">Attack Move<br><span>A</span></button>
             </div>
+            <div id="building-command-panel" class="rts-tactical-commands" hidden>
+              <div class="rts-command-group-title">Building Orders</div>
+              <button id="sell-building-command-button" data-command-icon="SL" data-command-tone="cash" type="button" aria-label="Sell selected building">Sell<br><span>Refund metal</span></button>
+            </div>
           </div>
           <section class="rts-intel-panel" aria-label="Battlefield intel">
             <div class="rts-objective-panel" aria-label="Skirmish objectives">
@@ -240,6 +259,11 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
     scrollSpeedReadoutElement: requiredElement<HTMLSpanElement>('#scroll-speed-readout'),
     edgeScrollToggleElement: requiredElement<HTMLInputElement>('#edge-scroll-toggle'),
     difficultySelectElement: requiredElement<HTMLSelectElement>('#difficulty-select'),
+    saveGameButtonElement: requiredElement<HTMLButtonElement>('#save-game-button'),
+    loadGameButtonElement: requiredElement<HTMLButtonElement>('#load-game-button'),
+    exportSaveButtonElement: requiredElement<HTMLButtonElement>('#export-save-button'),
+    importSaveButtonElement: requiredElement<HTMLButtonElement>('#import-save-button'),
+    importSaveInputElement: requiredElement<HTMLInputElement>('#import-save-input'),
     factoryCommandsElement: requiredElement<HTMLDivElement>('#factory-command-panel'),
     workerButtonElement: requiredElement<HTMLButtonElement>('#produce-worker-button'),
     truckButtonElement: requiredElement<HTMLButtonElement>('#produce-truck-button'),
@@ -277,6 +301,8 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
     workerBuildDetailsElement: requiredElement<HTMLDivElement>('#worker-build-details'),
     placementElement: requiredElement<HTMLDivElement>('#placement-readout'),
     tacticalCommandsElement: requiredElement<HTMLDivElement>('#tactical-command-panel'),
+    buildingCommandsElement: requiredElement<HTMLDivElement>('#building-command-panel'),
+    sellBuildingButtonElement: requiredElement<HTMLButtonElement>('#sell-building-command-button'),
     stopButtonElement: requiredElement<HTMLButtonElement>('#stop-command-button'),
     attackButtonElement: requiredElement<HTMLButtonElement>('#attack-command-button'),
     holdButtonElement: requiredElement<HTMLButtonElement>('#hold-command-button'),

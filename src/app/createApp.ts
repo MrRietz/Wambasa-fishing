@@ -6,8 +6,8 @@ import { chooseAiRaidAttacker } from '../game/ai/aiPressureSystem';
 import { AudioManager, syncAudioControls, type SfxCue } from '../game/audio/audioManager';
 import { loadUnitSpriteTextures } from '../game/art/unitSpriteAssets';
 import type { CommandResult } from '../game/commands/commandTypes';
-import { executeAttackCommand, executeAttackMoveCommand, executeDockRepairCommand, executeFactoryCrewCommand, executeFishingCommand, executeFishUnloadCommand, executeHarvestMetalCommand, executeHoldCommand, executeInstantBuildCommand, executeMetalUnloadCommand, executeMoveCommand, executeProductionCommand, executeRepairCommand, executeSabotageCommand, executeStopCommand, executeWorkerFishingCommand, executeWorkerFishUnloadCommand } from '../game/commands/commandHandlers';
-import { AI_PROFIT_TARGET, DEFAULT_ZOOM, ECONOMIC_VICTORY_LEAD_REQUIRED, EDGE_SCROLL_SIZE, EDGE_SCROLL_SPEED, FIRST_SKIRMISH_BALANCE, GUARD_TOWER_DAMAGE_PER_SECOND, GUARD_TOWER_RANGE, KEY_SCROLL_SPEED, MAX_ZOOM, MIN_ZOOM, PLAYER_PROFIT_TARGET, UNIT_BLOCKER_PADDING, WORLD_HEIGHT, WORLD_WIDTH } from '../game/config/constants';
+import { executeAttackCommand, executeAttackMoveCommand, executeDockRepairCommand, executeFactoryCrewCommand, executeFishingCommand, executeFishUnloadCommand, executeHarvestMetalCommand, executeHoldCommand, executeInstantBuildCommand, executeMetalUnloadCommand, executeMoveCommand, executeProductionCommand, executeRepairCommand, executeSabotageCommand, executeSellBuildingCommand, executeStopCommand, executeWorkerFishingCommand, executeWorkerFishUnloadCommand } from '../game/commands/commandHandlers';
+import { AI_PROFIT_TARGET, DEFAULT_ZOOM, ECONOMIC_VICTORY_LEAD_REQUIRED, EDGE_SCROLL_SIZE, EDGE_SCROLL_SPEED, FIRST_SKIRMISH_BALANCE, FIRST_SKIRMISH_COMBAT_PRESSURE, GUARD_TOWER_DAMAGE_PER_SECOND, GUARD_TOWER_RANGE, KEY_SCROLL_SPEED, MAX_ZOOM, MIN_ZOOM, PLAYER_PROFIT_TARGET, UNIT_BLOCKER_PADDING, WORLD_HEIGHT, WORLD_WIDTH } from '../game/config/constants';
 import { clamp } from '../game/core/math';
 import { buildingCatalog } from '../game/data/buildings';
 import { getEntityCrewCost, productionCatalog } from '../game/data/production';
@@ -51,7 +51,7 @@ import {
   initializeWorldOverlays,
 } from '../game/render/overlays';
 import { updateTerrainAnimation } from '../game/render/terrainRenderer';
-import { resolveMobileUnitOverlaps as resolveMobileUnitOverlapsForSystem } from '../game/simulation/systems/collisionSystem';
+import { resolveMobileUnitOverlaps as resolveMobileUnitOverlapsForSystem, updateTruckCrushSystem, type CrushSystemEvent } from '../game/simulation/systems/collisionSystem';
 import { updateConstructionJobs } from '../game/simulation/systems/constructionSystem';
 import { updateFishingSystem } from '../game/simulation/systems/fishingSystem';
 import { countAssignedFactoryCrew, destroyAssignedFactoryCrew, FACTORY_WORKER_CAP, releaseFactoryCrew } from '../game/simulation/systems/factoryCrewSystem';
@@ -61,6 +61,7 @@ import { updateProductionQueues } from '../game/simulation/systems/productionSys
 import { updateRepairSystem } from '../game/simulation/systems/repairSystem';
 import { updateSabotageSystem } from '../game/simulation/systems/sabotageSystem';
 import { updateDestructionSystem } from '../game/simulation/systems/destructionSystem';
+import { createSaveGameSnapshot, loadGameFromLocalStorage, parseSaveGameSnapshot, saveGameToLocalStorage, serializeSaveGameSnapshot, type SaveGameSnapshot } from '../game/persistence/saveGame';
 import { updateWorkerFishingSystem } from '../game/simulation/systems/workerFishingSystem';
 import { evaluateWinCondition } from '../game/simulation/systems/winConditionSystem';
 import { applyUiScale, loadPlayerSettings, persistPlayerSettings } from '../game/settings/playerSettings';
@@ -78,6 +79,7 @@ import { createRenderRuntime } from './runtime/renderRuntime';
 type BootStatus = 'loading' | 'ready' | 'failed';
 
 const MOVEMENT_RENDER_INTERVAL_SECONDS = 1 / 24;
+const TRUCK_CRUSH_MINIMUM_SPEED = 42;
 
 declare global {
   interface Window {
@@ -106,7 +108,7 @@ let nextEnemyWorkerId = 4;
 let nextEnemyTruckId = 2;
 let nextEnemyBoatId = 1;
 let nextEnemyAttackBoatId = 1;
-let nextEnemyGuardId = 1;
+let nextEnemyGuardId = 2;
 let nextEnemySaboteurId = 1;
 let nextEnemyDockId = 1;
 let nextEnemyBarracksId = 1;
@@ -154,7 +156,7 @@ const aiDefenseState: AiDefenseState = {
   defensiveStructureBuilt: false,
 };
 
-const { rootElement, gameElement, statusElement, skirmishButton, pauseToggleButtonElement, minimapElement, minimapContext, commandHintElement, alertFeedElement, selectionElement, viewportHudElement, viewportModeElement, viewportSelectionElement, viewportHotkeyElement, economyElement, musicSliderElement, sfxSliderElement, musicReadoutElement, sfxReadoutElement, uiScaleSliderElement, uiScaleReadoutElement, scrollSpeedSliderElement, scrollSpeedReadoutElement, edgeScrollToggleElement, difficultySelectElement, factoryCommandsElement, workerButtonElement, truckButtonElement, sellReelsButtonElement, toggleAutoSellButtonElement, releaseFactoryCrewDecreaseButtonElement, releaseFactoryCrewCountElement, releaseFactoryCrewButtonElement, releaseFactoryCrewIncreaseButtonElement, productionElement, factoryReelReadoutElement, barracksCommandsElement, guardButtonElement, saboteurButtonElement, barracksProductionElement, dockCommandsElement, boatButtonElement, attackBoatButtonElement, dockProductionElement, techLabCommandsElement, cncUpgradeButtonElement, militaryUpgradeButtonElement, boatsUpgradeButtonElement, reelsUpgradeButtonElement, techLabReadoutElement, workerCommandsElement, placeHouseButtonElement, placeDockButtonElement, placeGuardTowerButtonElement, placeTechLabButtonElement, placeBarracksButtonElement, placeFactoryButtonElement, assignFactoryCrewButtonElement, equipReelButtonElement, workerBuildDetailsElement, placementElement, tacticalCommandsElement, stopButtonElement, attackButtonElement, holdButtonElement, attackMoveButtonElement, resultPanelElement, resultTitleElement, resultReasonElement, resultAdviceElement, resultSummaryElement, restartButtonElement, pausePanelElement, resumeButtonElement, pauseRestartButtonElement, objectiveListElement } = mountRtsDomShell();
+const { rootElement, gameElement, statusElement, skirmishButton, pauseToggleButtonElement, minimapElement, minimapContext, commandHintElement, alertFeedElement, selectionElement, viewportHudElement, viewportModeElement, viewportSelectionElement, viewportHotkeyElement, economyElement, musicSliderElement, sfxSliderElement, musicReadoutElement, sfxReadoutElement, uiScaleSliderElement, uiScaleReadoutElement, scrollSpeedSliderElement, scrollSpeedReadoutElement, edgeScrollToggleElement, difficultySelectElement, saveGameButtonElement, loadGameButtonElement, exportSaveButtonElement, importSaveButtonElement, importSaveInputElement, factoryCommandsElement, workerButtonElement, truckButtonElement, sellReelsButtonElement, toggleAutoSellButtonElement, releaseFactoryCrewDecreaseButtonElement, releaseFactoryCrewCountElement, releaseFactoryCrewButtonElement, releaseFactoryCrewIncreaseButtonElement, productionElement, factoryReelReadoutElement, barracksCommandsElement, guardButtonElement, saboteurButtonElement, barracksProductionElement, dockCommandsElement, boatButtonElement, attackBoatButtonElement, dockProductionElement, techLabCommandsElement, cncUpgradeButtonElement, militaryUpgradeButtonElement, boatsUpgradeButtonElement, reelsUpgradeButtonElement, techLabReadoutElement, workerCommandsElement, placeHouseButtonElement, placeDockButtonElement, placeGuardTowerButtonElement, placeTechLabButtonElement, placeBarracksButtonElement, placeFactoryButtonElement, assignFactoryCrewButtonElement, equipReelButtonElement, workerBuildDetailsElement, placementElement, tacticalCommandsElement, buildingCommandsElement, sellBuildingButtonElement, stopButtonElement, attackButtonElement, holdButtonElement, attackMoveButtonElement, resultPanelElement, resultTitleElement, resultReasonElement, resultAdviceElement, resultSummaryElement, restartButtonElement, pausePanelElement, resumeButtonElement, pauseRestartButtonElement, objectiveListElement } = mountRtsDomShell();
 const root = rootElement;
 const hudPresenter = createHudPresenter(root, {
   commandHintElement,
@@ -202,6 +204,8 @@ const hudPresenter = createHudPresenter(root, {
   workerBuildDetailsElement,
   placementElement,
   tacticalCommandsElement,
+  buildingCommandsElement,
+  sellBuildingButtonElement,
   stopButtonElement,
   attackButtonElement,
   holdButtonElement,
@@ -221,8 +225,8 @@ const hudPresenter = createHudPresenter(root, {
 const minimapDrawingContext = minimapContext;
 
 const camera: CameraState = {
-  x: 180,
-  y: 300,
+  x: 300,
+  y: 220,
   zoom: DEFAULT_ZOOM,
 };
 
@@ -266,6 +270,7 @@ let combatPreviewTargetId: string | undefined;
 let combatPreviewTargetValid = false;
 let lastCommandResult: CommandResult | undefined;
 let lastCombatEvent: RtsDebugState['lastCombatEvent'];
+let lastCrushEvent: RtsDebugState['lastCrushEvent'];
 let lastSabotageEvent: RtsDebugState['lastSabotageEvent'];
 let lastRepairEvent: RtsDebugState['lastRepairEvent'];
 let lastResourceEvent: RtsDebugState['lastResourceEvent'];
@@ -290,11 +295,13 @@ const minimapAttackPings: Array<{
   durationSeconds: number;
   severity: 'warning' | 'error';
 }> = [];
+const crushEffects: Array<{ x: number; y: number; startedAtSeconds: number; durationSeconds: number }> = [];
 const audioManager = new AudioManager(window);
 const audioState = audioManager.state;
 const playerSettings = loadPlayerSettings(window);
 let pauseMenuOpen = false;
 let skirmishStarted = false;
+const APP_SAVE_VERSION = '0.1.0';
 
 audioManager.loadPersistedSettings();
 applyPlayerSettings();
@@ -352,6 +359,7 @@ function isImportantPlayerWarningTarget(entity: GameEntity): boolean {
     || entity.kind === 'dock'
     || entity.kind === 'truck'
     || entity.kind === 'boat'
+    || entity.kind === 'guard'
     || entity.kind === 'guardTower'
     || entity.kind === 'techLab'
     || entity.kind === 'barracks'
@@ -545,6 +553,98 @@ function updatePlayerSetting(key: 'uiScale' | 'scrollSpeed' | 'edgeScroll' | 'di
   Object.assign(playerSettings, { [key]: value }); applyPlayerSettings(); persistPlayerSettings(window, playerSettings); if (debugState) window.__wambasaRts = { ...debugState, settings: { ...playerSettings } };
 }
 
+function createCurrentSaveSnapshot(): SaveGameSnapshot {
+  return createSaveGameSnapshot({
+    appVersion: APP_SAVE_VERSION,
+    simulationClockSeconds,
+    entities,
+    resourceFields,
+    fishingZoneStates,
+    economyState,
+    aiEconomyState,
+    matchState,
+    matchStats,
+    crewState,
+    aiController,
+    aiDefenseState,
+  });
+}
+
+function saveCurrentGame(layers: RenderLayers): void {
+  saveGameToLocalStorage(window, createCurrentSaveSnapshot());
+  setBootStatus('ready', 'Skirmish saved locally.');
+  playSfx('confirm');
+  publishDebugState(layers);
+}
+
+function loadSavedGame(layers: RenderLayers): void {
+  const result = loadGameFromLocalStorage(window);
+  if (!result.ok) {
+    setBootStatus('ready', `Load failed: ${result.message}`);
+    playSfx('error');
+    publishDebugState(layers);
+    return;
+  }
+  restoreSaveGame(result.snapshot, layers, 'Skirmish loaded from local save.');
+}
+
+function exportCurrentSave(): void {
+  const blob = new Blob([serializeSaveGameSnapshot(createCurrentSaveSnapshot())], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `wambasa-save-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function importSaveFile(file: File, layers: RenderLayers): Promise<void> {
+  const result = parseSaveGameSnapshot(await file.text());
+  importSaveInputElement.value = '';
+  if (!result.ok) {
+    setBootStatus('ready', `Import failed: ${result.message}`);
+    playSfx('error');
+    publishDebugState(layers);
+    return;
+  }
+  restoreSaveGame(result.snapshot, layers, 'Skirmish imported and loaded.');
+}
+
+function restoreSaveGame(snapshot: SaveGameSnapshot, layers: RenderLayers, message: string): void {
+  simulationClockSeconds = snapshot.simulationClockSeconds;
+  entities.splice(0, entities.length, ...snapshot.entities);
+  resourceFields.splice(0, resourceFields.length, ...snapshot.resourceFields);
+  fishingZoneStates.splice(0, fishingZoneStates.length, ...snapshot.fishingZoneStates);
+  Object.assign(economyState, snapshot.economyState);
+  Object.assign(aiEconomyState, snapshot.aiEconomyState);
+  Object.assign(matchState, snapshot.matchState);
+  Object.assign(matchStats, snapshot.matchStats);
+  Object.assign(crewState, snapshot.crewState);
+  Object.assign(aiController, snapshot.aiController);
+  Object.assign(aiDefenseState, snapshot.aiDefenseState);
+  selectedEntityIds.clear();
+  movementRecoveryState.clear();
+  lastMoveCommand = undefined;
+  lastCommandResult = undefined;
+  lastCombatEvent = undefined;
+  lastCrushEvent = undefined;
+  lastSabotageEvent = undefined;
+  lastRepairEvent = undefined;
+  pauseMenuOpen = true;
+  skirmishStarted = true;
+  renderMap(layers);
+  renderEntities(layers);
+  updateFogOfWar(layers);
+  drawSelectionOverlay(layers);
+  updateEconomyReadout();
+  updateSelectionReadout();
+  updateMatchResultPanel();
+  syncPauseUi();
+  setBootStatus('ready', message);
+  playSfx('confirm');
+  publishDebugState(layers);
+}
+
 function getObjectiveDebugState(): RtsDebugState['objectives'] {
   const selectedPlayerCommandable = [...selectedEntityIds].some((id) => {
     const entity = entities.find((candidate) => candidate.id === id);
@@ -578,13 +678,6 @@ function getObjectiveDebugState(): RtsDebugState['objectives'] {
       current: false,
     },
     {
-      id: 'fish',
-      title: 'Sell fish for cash',
-      description: 'Workers can fish shoreline shoals and sell the catch at Factory until you build a Dock.',
-      complete: economyState.cash > FIRST_SKIRMISH_BALANCE.playerStartingCash,
-      current: false,
-    },
-    {
       id: 'dock',
       title: 'Build your first Dock',
       description: 'A Dock unlocks boats and offshore fishing routes.',
@@ -596,6 +689,13 @@ function getObjectiveDebugState(): RtsDebugState['objectives'] {
       title: 'Produce a Fishing Boat',
       description: 'Select the Dock and launch a boat once your shoreline economy is running.',
       complete: playerBoat,
+      current: false,
+    },
+    {
+      id: 'fish',
+      title: 'Sell fish for cash',
+      description: 'Send workers to shoreline shoals or boats to offshore banks, then unload the catch for cash.',
+      complete: economyState.cash > FIRST_SKIRMISH_BALANCE.playerStartingCash,
       current: false,
     },
     {
@@ -689,6 +789,7 @@ function publishDebugState(layers: RenderLayers): void {
     lastMoveCommand,
     lastCommandResult,
     lastCombatEvent,
+    lastCrushEvent,
     lastSabotageEvent,
     lastRepairEvent,
     collision: getCollisionDebugState(),
@@ -707,7 +808,7 @@ function publishDebugState(layers: RenderLayers): void {
       aiProfitTarget: AI_PROFIT_TARGET,
     },
     stats: { ...matchStats },
-    balance: FIRST_SKIRMISH_BALANCE,
+    balance: { ...FIRST_SKIRMISH_BALANCE, combatPressure: FIRST_SKIRMISH_COMBAT_PRESSURE },
     performance: getPerformanceDebugState(),
     audio: { ...audioState },
     settings: { ...playerSettings },
@@ -814,7 +915,14 @@ const {
 });
 
 function getEntityRenderContext(): EntityRenderContext {
-  return { entities: entities.filter((entity) => isEntityVisible(visibilityState, entity)), getDamageState, getMaxHealth };
+  return {
+    entities: entities.filter((entity) => isEntityVisible(visibilityState, entity)),
+    getDamageState,
+    getMaxHealth,
+    crushEffects: crushEffects
+      .map((effect) => ({ ...effect, ageSeconds: simulationClockSeconds - effect.startedAtSeconds }))
+      .filter((effect) => effect.ageSeconds <= effect.durationSeconds),
+  };
 }
 
 function getMobileEntities(): GameEntity[] {
@@ -939,13 +1047,14 @@ function issueDeleteSelectedCommand(layers: RenderLayers): void {
   const deletable = selected.filter(
     (entity) =>
       entity.faction === 'player' &&
+      entity.renderable.layer !== 'buildings' &&
       !entity.renderable.hidden &&
       entity.economy?.health !== undefined &&
       getDamageState(entity) !== 'destroyed',
   );
 
   if (deletable.length === 0) {
-    setBootStatus('ready', selected.length > 0 ? 'Delete rejected: only your own units and buildings can be deleted.' : 'Select a unit or building before pressing Delete.');
+    setBootStatus('ready', selected.some((entity) => entity.renderable.layer === 'buildings') ? 'Use Sell for buildings.' : selected.length > 0 ? 'Delete rejected: only your own units can be deleted.' : 'Select a unit before pressing Delete.');
     playSfx('error');
     publishDebugState(layers);
     return;
@@ -965,6 +1074,31 @@ function issueDeleteSelectedCommand(layers: RenderLayers): void {
   updateSelectionReadout();
   evaluateMatchEnd(layers);
   setBootStatus('ready', `Deleted ${entity.name}.`);
+  publishDebugState(layers);
+}
+
+function issueSellSelectedBuildingCommand(layers: RenderLayers): void {
+  const building = getSelectedFriendlyBuilding();
+  const result = executeSellBuildingCommand({
+    building,
+    stockpile: economyState,
+    crewState,
+    entities,
+    getDamageState,
+  });
+  reportCommandResult(result, layers);
+  if (!result.ok) {
+    return;
+  }
+  if (building) {
+    selectedEntityIds.delete(building.id);
+  }
+  playSfx('build');
+  renderEntities(layers);
+  drawSelectionOverlay(layers);
+  updateEconomyReadout();
+  updateSelectionReadout();
+  evaluateMatchEnd(layers);
   publishDebugState(layers);
 }
 
@@ -1203,6 +1337,7 @@ function updateSelectionReadout(): void {
     selectedDock: getSelectedDock(),
     selectedBarracks: getSelectedBarracks(),
     selectedTechLab: getSelectedTechLab(),
+    selectedBuilding: getSelectedFriendlyBuilding(),
     selectedWorkerCount: getSelectedWorkers().length,
     selectedFactoryCrewCount: getSelectedFactoryCrewCount(),
     selectedFactoryReleaseCount: getRequestedFactoryCrewReleaseCount(),
@@ -1239,6 +1374,7 @@ function updateEconomyReadout(): void {
     selectedDock: getSelectedDock(),
     selectedBarracks: getSelectedBarracks(),
     selectedTechLab: getSelectedTechLab(),
+    selectedBuilding: getSelectedFriendlyBuilding(),
     selectedWorkerCount: getSelectedWorkers().length,
     selectedFactoryCrewCount: getSelectedFactoryCrewCount(),
     selectedFactoryReleaseCount: getRequestedFactoryCrewReleaseCount(),
@@ -1283,6 +1419,14 @@ function updateDockCommandPanel(): void {
 
 function getSelectedFactory(): GameEntity | null {
   return querySelectedFactory(entities, selectedEntityIds);
+}
+
+function getSelectedFriendlyBuilding(): GameEntity | null {
+  return (
+    getSelectedEntities(entities, selectedEntityIds).find(
+      (entity) => entity.faction === 'player' && entity.renderable.layer === 'buildings' && getDamageState(entity) !== 'destroyed',
+    ) ?? null
+  );
 }
 
 function getAvailablePlayerFactories(): GameEntity[] {
@@ -1972,20 +2116,23 @@ function issueHarvestMetalCommand(field: ResourceField, layers: RenderLayers): b
 }
 
 function issueFishingCommand(zone: FishingZoneData, layers: RenderLayers): boolean {
+  const selectedUnits = getSelectedPlayerCommandableUnits();
+  const hasSelectedWorkers = selectedUnits.some((entity) => entity.kind === 'worker');
+  const hasSelectedFishingBoats = selectedUnits.some((entity) => entity.kind === 'boat' && Boolean(entity.economy?.cargo));
   const workerOutput = executeWorkerFishingCommand({
     zone,
-    selectedUnits: getSelectedPlayerCommandableUnits(),
+    selectedUnits,
     findLandPath,
     findEntityLandPath,
     getWorkerFishingPoint,
   });
-  if (workerOutput.handled && workerOutput.result?.ok) {
+  if (workerOutput.handled && (workerOutput.result?.ok || (hasSelectedWorkers && !hasSelectedFishingBoats))) {
     return finishCommandWithMoveOverlay(workerOutput, layers);
   }
   return finishCommandWithMoveOverlay(
     executeFishingCommand({
       zone,
-      selectedUnits: getSelectedPlayerCommandableUnits(),
+      selectedUnits,
       findWaterPath,
       getFishingInteractionPoint,
     }),
@@ -2338,7 +2485,7 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
-function updateProduction(deltaSeconds: number, layers: RenderLayers): boolean {
+function updateProduction(app: Application, deltaSeconds: number, layers: RenderLayers): boolean {
   const result = updateProductionQueues({
     producers: entities.filter((entity) => entity.faction === 'player' && entity.economy?.productionQueue),
     deltaSeconds,
@@ -2349,6 +2496,10 @@ function updateProduction(deltaSeconds: number, layers: RenderLayers): boolean {
 
   for (const spawned of result.spawned) {
     lastProductionEvent = { kind: 'spawned', product: spawned.product, entityId: spawned.entityId, stockpile: spawned.stockpile };
+    const spawnedEntity = entities.find((entity) => entity.id === spawned.entityId);
+    if (spawnedEntity?.kind === 'boat') {
+      centerCameraOn(app, spawnedEntity.x, spawnedEntity.y, layers);
+    }
     playSfx('produce');
     setBootStatus('ready', `${spawned.label} produced.`);
   }
@@ -2920,7 +3071,7 @@ function installDebugTestHooks(layers?: RenderLayers): void {
     if (!debugHookLayers) return false;
     aiController.raidIssued = false;
     aiController.raidDelaySeconds = 0;
-    const raider = chooseAiRaidAttacker(entities, getDamageState);
+    const raider = chooseDebugRaidAttacker();
     if (raider) {
       raider.path = []; raider.moveTarget = undefined; raider.movement.state = 'idle'; raider.economy = { ...raider.economy, attack: undefined, buildJob: undefined };
     }
@@ -2929,7 +3080,19 @@ function installDebugTestHooks(layers?: RenderLayers): void {
       ?? findExposedPlayerEconomyUnit();
     if (!raider || !target) return false;
     raider.x = target.x + getCollisionRadius(target) + 32; raider.y = target.y; raider.path = []; raider.moveTarget = undefined; raider.movement.state = 'idle';
-    raider.economy = { ...raider.economy, attack: { targetId: target.id, phase: 'attacking', damagePerSecond: raider.kind === 'guard' ? 24 : 18, range: raider.kind === 'guard' ? 90 : 72 } };
+    raider.economy = {
+      ...raider.economy,
+      attack: {
+        targetId: target.id,
+        phase: 'attacking',
+        damagePerSecond: raider.kind === 'guard'
+          ? FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidGuardDamagePerSecond
+          : FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidWorkerDamagePerSecond,
+        range: raider.kind === 'guard'
+          ? FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidGuardAttackRange
+          : FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidWorkerAttackRange,
+      },
+    };
     aiController.raidIssued = true; aiController.lastAction = `Rival raid warning: ${target.name} is exposed.`;
     aiController.lastRaidEvent = { kind: 'queued', attackerId: raider.id, targetId: target.id, targetHealth: target.economy?.health };
     issuePlayerAssetWarning(target, 'incoming');
@@ -2960,6 +3123,19 @@ function installDebugTestHooks(layers?: RenderLayers): void {
     }
     return true;
   };
+}
+
+function chooseDebugRaidAttacker(): GameEntity | null {
+  return chooseAiRaidAttacker(entities, getDamageState)
+    ?? entities.find(
+      (entity) =>
+        entity.faction === 'enemy' &&
+        entity.kind === 'worker' &&
+        getDamageState(entity) !== 'destroyed' &&
+        entity.movement.speed > 0 &&
+        !entity.economy?.buildJob,
+    )
+    ?? null;
 }
 
 function updateSabotage(deltaSeconds: number, layers: RenderLayers): boolean {
@@ -3133,6 +3309,7 @@ function getRaidCandidateTargets(priority?: Array<GameEntity['kind']>): GameEnti
           entity.kind === 'dock' ||
           entity.kind === 'barracks' ||
           entity.kind === 'guardTower' ||
+          entity.kind === 'guard' ||
           entity.kind === 'factory'
         ),
     )
@@ -3222,18 +3399,7 @@ function describeAiRaidTactic(): string {
 }
 
 function getAiRaidSquad(leadAttacker: GameEntity, target: GameEntity): GameEntity[] {
-  const baseSize =
-    aiController.activeTactic === 'baseSiege' || aiController.strategy === 'siege'
-      ? 3
-      : aiController.activeTactic === 'probeEconomy'
-        ? 1
-        : 2;
-  const desiredSize =
-    playerSettings.difficulty === 'hard'
-      ? baseSize + 1
-      : playerSettings.difficulty === 'easy'
-        ? Math.max(1, baseSize - 1)
-        : baseSize;
+  const desiredSize = getDesiredAiRaidSquadSize();
   const candidates = entities.filter(
     (entity) =>
       entity.faction === 'enemy' &&
@@ -3249,7 +3415,21 @@ function getAiRaidSquad(leadAttacker: GameEntity, target: GameEntity): GameEntit
     const scoreB = b.id === leadAttacker.id ? -2 : b.kind === 'guard' ? 0 : 2;
     return scoreA - scoreB || Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y);
   });
+  if (prioritized.length < desiredSize) {
+    return [];
+  }
   return prioritized.slice(0, desiredSize);
+}
+
+function getDesiredAiRaidSquadSize(): number {
+  const baseSize =
+    aiController.activeTactic === 'baseSiege' || aiController.strategy === 'siege'
+      ? FIRST_SKIRMISH_COMBAT_PRESSURE.desiredRaidSquadSize.siege
+      : aiController.activeTactic === 'probeEconomy'
+        ? FIRST_SKIRMISH_COMBAT_PRESSURE.desiredRaidSquadSize.probeEconomy
+        : FIRST_SKIRMISH_COMBAT_PRESSURE.desiredRaidSquadSize.standard;
+  const adjustment = FIRST_SKIRMISH_COMBAT_PRESSURE.difficultyRaidSquadAdjustment[playerSettings.difficulty];
+  return Math.max(1, baseSize + adjustment);
 }
 
 function getStaggeredRaidApproachPoint(target: GameEntity, index: number, count: number): { x: number; y: number } {
@@ -3274,12 +3454,21 @@ function getAiRepeatRaidDelaySeconds(): number {
           ? 2
         : 0;
   if (playerSettings.difficulty === 'hard') {
-    return Math.max(10, FIRST_SKIRMISH_BALANCE.aiRepeatRaidDelaySeconds - 6 + strategyAdjustment);
+    return Math.max(
+      FIRST_SKIRMISH_COMBAT_PRESSURE.minimumRepeatRaidDelaySeconds,
+      FIRST_SKIRMISH_BALANCE.aiRepeatRaidDelaySeconds
+        + FIRST_SKIRMISH_COMBAT_PRESSURE.difficultyRepeatRaidDelayAdjustmentSeconds.hard
+        + strategyAdjustment,
+    );
   }
   if (playerSettings.difficulty === 'easy') {
-    return FIRST_SKIRMISH_BALANCE.aiRepeatRaidDelaySeconds + 6 + strategyAdjustment;
+    return FIRST_SKIRMISH_BALANCE.aiRepeatRaidDelaySeconds
+      + FIRST_SKIRMISH_COMBAT_PRESSURE.difficultyRepeatRaidDelayAdjustmentSeconds.easy
+      + strategyAdjustment;
   }
-  return FIRST_SKIRMISH_BALANCE.aiRepeatRaidDelaySeconds + strategyAdjustment;
+  return FIRST_SKIRMISH_BALANCE.aiRepeatRaidDelaySeconds
+    + FIRST_SKIRMISH_COMBAT_PRESSURE.difficultyRepeatRaidDelayAdjustmentSeconds.normal
+    + strategyAdjustment;
 }
 
 function getAttackApproachPoint(target: GameEntity, index: number, count: number): { x: number; y: number } {
@@ -3510,7 +3699,10 @@ function getMovementBlockerIgnoredTargetId(entity?: GameEntity): string | undefi
       ?? entity.economy?.factoryDuty?.factoryId
       ?? entity.economy?.unloadingFish?.targetId;
   }
-  if (entity.kind === 'truck' && entity.economy?.harvesting?.phase === 'returning') {
+  if (
+    entity.kind === 'truck' &&
+    ['loading', 'returning', 'manual-returning', 'return-blocked'].includes(entity.economy?.harvesting?.phase ?? '')
+  ) {
     return entities.find(
       (candidate) =>
         candidate.faction === entity.faction &&
@@ -3765,17 +3957,7 @@ function recoverLandMovement(entity: GameEntity): boolean {
     return false;
   }
 
-  const candidateTargets = [
-    finalTarget,
-    { x: finalTarget.x + 36, y: finalTarget.y },
-    { x: finalTarget.x - 36, y: finalTarget.y },
-    { x: finalTarget.x, y: finalTarget.y + 36 },
-    { x: finalTarget.x, y: finalTarget.y - 36 },
-    { x: finalTarget.x + 28, y: finalTarget.y + 28 },
-    { x: finalTarget.x - 28, y: finalTarget.y + 28 },
-    { x: finalTarget.x + 28, y: finalTarget.y - 28 },
-    { x: finalTarget.x - 28, y: finalTarget.y - 28 },
-  ];
+  const candidateTargets = getLandRecoveryTargets(entity, finalTarget);
 
   for (const target of candidateTargets) {
     const path = findEntityLandPath(entity, { x: entity.x, y: entity.y }, target);
@@ -3788,6 +3970,72 @@ function recoverLandMovement(entity: GameEntity): boolean {
   }
 
   return false;
+}
+
+function getLandRecoveryTargets(entity: GameEntity, finalTarget: { x: number; y: number }): Array<{ x: number; y: number }> {
+  const candidateTargets = [
+    finalTarget,
+    { x: finalTarget.x + 36, y: finalTarget.y },
+    { x: finalTarget.x - 36, y: finalTarget.y },
+    { x: finalTarget.x, y: finalTarget.y + 36 },
+    { x: finalTarget.x, y: finalTarget.y - 36 },
+    { x: finalTarget.x + 28, y: finalTarget.y + 28 },
+    { x: finalTarget.x - 28, y: finalTarget.y + 28 },
+    { x: finalTarget.x + 28, y: finalTarget.y - 28 },
+    { x: finalTarget.x - 28, y: finalTarget.y - 28 },
+  ];
+
+  const interactionTargetId = getMovementBlockerIgnoredTargetId(entity);
+  const interactionTarget = interactionTargetId ? entities.find((candidate) => candidate.id === interactionTargetId) : undefined;
+  if (interactionTarget?.collider.kind === 'rect') {
+    candidateTargets.push(...getRectEntityRecoveryTargets(interactionTarget, finalTarget, getCollisionRadius(entity)));
+  }
+
+  const unique = new Map<string, { x: number; y: number }>();
+  for (const target of candidateTargets) {
+    unique.set(`${Math.round(target.x)}:${Math.round(target.y)}`, {
+      x: clamp(target.x, 40, WORLD_WIDTH - 40),
+      y: clamp(target.y, 40, WORLD_HEIGHT - 40),
+    });
+  }
+  return [...unique.values()];
+}
+
+function getRectEntityRecoveryTargets(target: GameEntity, preferred: { x: number; y: number }, actorRadius: number): Array<{ x: number; y: number }> {
+  if (target.collider.kind !== 'rect') {
+    return [];
+  }
+
+  const halfWidth = target.collider.width / 2;
+  const halfHeight = target.collider.height / 2;
+  const margin = Math.max(36, actorRadius + 22);
+  const inset = 18;
+  const dx = preferred.x - target.x;
+  const dy = preferred.y - target.y;
+  const primary = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'east' : 'west') : (dy >= 0 ? 'south' : 'north');
+  const sides = [primary, ...(['north', 'south', 'east', 'west'] as const).filter((side) => side !== primary)];
+  const lateralOffsets = [0, -0.35, 0.35, -0.7, 0.7];
+  const targets: Array<{ x: number; y: number }> = [];
+
+  for (const distance of [margin, margin + 32, margin + 72]) {
+    for (const side of sides) {
+      for (const lateral of lateralOffsets) {
+        if (side === 'north' || side === 'south') {
+          targets.push({
+            x: clamp(target.x + halfWidth * lateral, target.x - halfWidth + inset, target.x + halfWidth - inset),
+            y: side === 'north' ? target.y - halfHeight - distance : target.y + halfHeight + distance,
+          });
+        } else {
+          targets.push({
+            x: side === 'east' ? target.x + halfWidth + distance : target.x - halfWidth - distance,
+            y: clamp(target.y + halfHeight * lateral, target.y - halfHeight + inset, target.y + halfHeight - inset),
+          });
+        }
+      }
+    }
+  }
+
+  return targets;
 }
 
 function tryAdvanceMobileEntity(entity: GameEntity, targetX: number, targetY: number): boolean {
@@ -3887,6 +4135,9 @@ function completeNearbyHarvestArrival(entity: GameEntity, layers: RenderLayers):
     if (Math.hypot(entity.x - field.x, entity.y - field.y) > harvestReach) {
       return false;
     }
+    const interactionPoint = getResourceInteractionPoint(field, entity.faction === 'enemy' ? 'left' : 'right');
+    entity.x = interactionPoint.x;
+    entity.y = interactionPoint.y;
   } else {
     const dropOff = getMetalDropOffPoint(entity);
     const unloadReach = getCollisionRadius(entity) + 58;
@@ -4005,6 +4256,7 @@ function updateAnimationStates(deltaSeconds: number, layers: RenderLayers): bool
 function updateEntityMovement(deltaSeconds: number, layers: RenderLayers): boolean {
   movementRenderSeconds += deltaSeconds;
   let moved = false;
+  const truckSpeeds = new Map<string, number>();
   for (const entity of entities) {
     if (!entity.moveTarget || entity.movement.speed <= 0) {
       movementRecoveryState.delete(entity.id);
@@ -4055,6 +4307,7 @@ function updateEntityMovement(deltaSeconds: number, layers: RenderLayers): boole
         movementRecoveryState.delete(entity.id);
         continue;
       }
+      recordTruckCrushSpeed(entity, previousX, previousY, deltaSeconds, truckSpeeds);
       entity.path.shift();
       while (entity.path[0] && Math.hypot(entity.path[0].x - entity.x, entity.path[0].y - entity.y) <= arrivalThreshold) {
         entity.path.shift();
@@ -4101,6 +4354,7 @@ function updateEntityMovement(deltaSeconds: number, layers: RenderLayers): boole
       movementRecoveryState.delete(entity.id);
       continue;
     }
+    recordTruckCrushSpeed(entity, previousX, previousY, deltaSeconds, truckSpeeds);
     entity.rotation = Math.atan2(dy, dx);
     moved = true;
 
@@ -4113,6 +4367,10 @@ function updateEntityMovement(deltaSeconds: number, layers: RenderLayers): boole
         movementRecoveryState.set(entity.id, { x: entity.x, y: entity.y, stagnantSeconds: 0 });
       }
     }
+  }
+
+  if (resolveTruckCrushes(truckSpeeds, layers)) {
+    moved = true;
   }
 
   if (resolveMobileUnitOverlapsForSystem(getLandMobileEntities(), isValidLandSeparationDestination)) {
@@ -4139,6 +4397,55 @@ function updateEntityMovement(deltaSeconds: number, layers: RenderLayers): boole
   }
 
   return moved;
+}
+
+function recordTruckCrushSpeed(entity: GameEntity, previousX: number, previousY: number, deltaSeconds: number, truckSpeeds: Map<string, number>): void {
+  if (entity.kind !== 'truck' || deltaSeconds <= 0) {
+    return;
+  }
+  const distance = Math.hypot(entity.x - previousX, entity.y - previousY);
+  truckSpeeds.set(entity.id, distance / deltaSeconds);
+}
+
+function resolveTruckCrushes(truckSpeeds: Map<string, number>, layers: RenderLayers): boolean {
+  const output = updateTruckCrushSystem({
+    trucks: getLandMobileEntities().filter((entity) => entity.kind === 'truck'),
+    entities,
+    truckSpeeds,
+    minimumCrushSpeed: TRUCK_CRUSH_MINIMUM_SPEED,
+    applyDamage,
+  });
+  if (!output.changed && output.events.length === 0) {
+    return false;
+  }
+
+  for (const event of output.events) {
+    handleCrushEvent(event);
+  }
+  renderUnits(layers);
+  drawSelectionOverlay(layers);
+  updateSelectionReadout();
+  publishDebugState(layers);
+  return true;
+}
+
+function handleCrushEvent(event: CrushSystemEvent): void {
+  lastCrushEvent = {
+    truckId: event.truckId,
+    targetId: event.targetId,
+    targetHealth: event.targetHealth,
+    faction: event.faction,
+    x: Math.round(event.x),
+    y: Math.round(event.y),
+  };
+  const target = entities.find((entity) => entity.id === event.targetId);
+  const truck = entities.find((entity) => entity.id === event.truckId);
+  crushEffects.unshift({ x: event.x, y: event.y, startedAtSeconds: simulationClockSeconds, durationSeconds: 0.42 });
+  crushEffects.splice(8);
+  playSfx('crush');
+  if (target && truck?.faction === 'enemy' && target.faction === 'player') {
+    setBootStatusWithFocus('ready', `Warning: ${target.name} was crushed.`, { x: event.x, y: event.y });
+  }
 }
 
 function completeArrival(entity: GameEntity, layers: RenderLayers, deltaSeconds = 0): void {
@@ -4342,9 +4649,13 @@ function completeArrival(entity: GameEntity, layers: RenderLayers, deltaSeconds 
   }
 
   for (const event of output.events) {
-    if (event.kind === 'fieldDepleted' || event.kind === 'returnPathBlocked') {
+    if (event.kind === 'fieldDepleted') {
       const replacementQueued = queueTruckHarvestAtBestField(entity, harvesting.fieldId);
       setBootStatus('ready', replacementQueued ? `${event.message} Redirecting truck to a new metal field.` : event.message);
+      continue;
+    }
+    if (event.kind === 'returnPathBlocked' || event.kind === 'fieldPathBlocked') {
+      setBootStatus('ready', event.message);
       continue;
     }
     if (event.kind === 'metalLoaded') {
@@ -4382,7 +4693,10 @@ function completeArrival(entity: GameEntity, layers: RenderLayers, deltaSeconds 
 function updateMetalHarvesting(deltaSeconds: number, layers: RenderLayers): boolean {
   let changed = false;
   for (const entity of entities) {
-    if (entity.kind !== 'truck' || entity.economy?.harvesting?.phase !== 'loading') {
+    if (
+      entity.kind !== 'truck' ||
+      !['loading', 'return-blocked', 'field-blocked'].includes(entity.economy?.harvesting?.phase ?? '')
+    ) {
       continue;
     }
 
@@ -4716,6 +5030,10 @@ function installCameraControls(app: Application, layers: RenderLayers): void {
     }
     if ((event.code === 'Delete' || event.code === 'Backspace') && selectedEntityIds.size > 0 && !isEditableKeyboardTarget(event.target)) {
       event.preventDefault();
+      if (getSelectedFriendlyBuilding()) {
+        issueSellSelectedBuildingCommand(layers);
+        return;
+      }
       issueDeleteSelectedCommand(layers);
       return;
     }
@@ -4844,7 +5162,7 @@ function installCameraControls(app: Application, layers: RenderLayers): void {
       updateTerrainAnimation(layers, simulationClockSeconds);
       updateEntityMovement(deltaSeconds, layers);
       updateMetalHarvesting(deltaSeconds, layers);
-      updateProduction(deltaSeconds, layers);
+      updateProduction(app, deltaSeconds, layers);
       updateConstruction(deltaSeconds, layers);
       updateFishing(deltaSeconds, layers);
       updateWorkerShoreFishing(deltaSeconds, layers);
@@ -4942,6 +5260,7 @@ export async function createWambasaRtsApp(): Promise<void> {
     attackButtonElement.addEventListener('click', () => beginAttackTarget(layers));
     holdButtonElement.addEventListener('click', () => issueHoldCommand(layers));
     attackMoveButtonElement.addEventListener('click', () => beginAttackMove(layers));
+    sellBuildingButtonElement.addEventListener('click', () => issueSellSelectedBuildingCommand(layers));
     sellReelsButtonElement.addEventListener('click', () => issueSellReelsCommand(layers));
     toggleAutoSellButtonElement.addEventListener('click', () => issueToggleAutoSellReels(layers));
     pauseToggleButtonElement.addEventListener('click', () => setPauseMenuOpen(!pauseMenuOpen, layers));
@@ -4952,6 +5271,16 @@ export async function createWambasaRtsApp(): Promise<void> {
     scrollSpeedSliderElement.addEventListener('input', () => updatePlayerSetting('scrollSpeed', Number(scrollSpeedSliderElement.value)));
     edgeScrollToggleElement.addEventListener('change', () => updatePlayerSetting('edgeScroll', edgeScrollToggleElement.checked));
     difficultySelectElement.addEventListener('change', () => updatePlayerSetting('difficulty', difficultySelectElement.value));
+    saveGameButtonElement.addEventListener('click', () => saveCurrentGame(layers));
+    loadGameButtonElement.addEventListener('click', () => loadSavedGame(layers));
+    exportSaveButtonElement.addEventListener('click', () => exportCurrentSave());
+    importSaveButtonElement.addEventListener('click', () => importSaveInputElement.click());
+    importSaveInputElement.addEventListener('change', () => {
+      const file = importSaveInputElement.files?.[0];
+      if (file) {
+        void importSaveFile(file, layers);
+      }
+    });
     restartButtonElement.addEventListener('click', () => window.location.reload());
     pauseRestartButtonElement.addEventListener('click', () => window.location.reload());
     pauseMenuOpen = true;

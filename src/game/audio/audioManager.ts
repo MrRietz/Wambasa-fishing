@@ -2,7 +2,7 @@ import { SETTINGS_STORAGE_KEY } from '../config/constants';
 import { clamp } from '../core/math';
 import type { RtsDebugState } from '../debug/debugState';
 
-export type SfxCue = 'confirm' | 'error' | 'produce' | 'harvest' | 'unload' | 'fish' | 'build' | 'repair' | 'sabotage' | 'warning' | 'victory' | 'defeat' | 'resource' | 'combat' | 'combatFire' | 'combatHit';
+export type SfxCue = 'confirm' | 'error' | 'produce' | 'harvest' | 'unload' | 'fish' | 'build' | 'repair' | 'sabotage' | 'warning' | 'victory' | 'defeat' | 'resource' | 'combat' | 'combatFire' | 'combatHit' | 'crush';
 type AudioState = RtsDebugState['audio'];
 type MusicLayer = AudioState['musicLayer'];
 
@@ -256,6 +256,12 @@ export class AudioManager {
       this.playTone(210, 0.03, 'square', destination, now, 0.08);
       this.playTone(110, 0.09, 'sawtooth', destination, now + 0.014, 0.08);
       this.playTone(72, 0.12, 'triangle', destination, now + 0.03, 0.05);
+      return;
+    }
+    if (cue === 'crush') {
+      this.setMusicLayer('combat');
+      this.playTone(86, 0.09, 'sawtooth', destination, now, 0.12);
+      this.playTone(54, 0.15, 'triangle', destination, now + 0.028, 0.09);
       return;
     }
     if (cue === 'warning') {

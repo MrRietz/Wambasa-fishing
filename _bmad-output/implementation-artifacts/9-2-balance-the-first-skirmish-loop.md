@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 9-2-balance-the-first-skirmish-loop
 epic: 9
 story: 2
@@ -65,3 +65,10 @@ The first skirmish balance is now explicit and testable. The player keeps the ex
 
 - 2026-05-16: Created Story 9.2 for first-skirmish balance.
 - 2026-05-16: Implemented explicit balance config, first-raid grace period, and regression coverage.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Verified explicit balance config, AI economy tick, delayed live raid pressure, and raid warning actionability.

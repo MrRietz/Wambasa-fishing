@@ -11,9 +11,12 @@ export type CommandFailureReason =
   | 'unaffordable'
   | 'not-worker-selected'
   | 'invalid-placement'
-  | 'no-combat-unit';
+  | 'no-combat-unit'
+  | 'protected-core'
+  | 'under-construction'
+  | 'already-destroyed';
 
-export type CommandKind = 'move' | 'harvestMetal' | 'metalUnload' | 'fish' | 'attack' | 'sabotage' | 'repair' | 'produce' | 'placement' | 'stop' | 'hold' | 'attackMove';
+export type CommandKind = 'move' | 'harvestMetal' | 'metalUnload' | 'fish' | 'attack' | 'sabotage' | 'repair' | 'produce' | 'placement' | 'stop' | 'hold' | 'attackMove' | 'sellBuilding';
 
 export type CommandResult =
   | { ok: true; kind: 'move' | 'harvestMetal' | 'metalUnload'; message: string; pathLength: number }
@@ -25,6 +28,7 @@ export type CommandResult =
   | { ok: true; kind: 'attackMove'; message: string; pathLength: number; unitCount: number }
   | { ok: true; kind: 'produce'; message: string; product: ProductionKind }
   | { ok: true; kind: 'placement'; message: string; building: BuildingPlanKind }
+  | { ok: true; kind: 'sellBuilding'; message: string; building: BuildingPlanKind; refundMetal: number; refundCash: number }
   | {
       ok: false;
       kind: CommandKind;

@@ -8,7 +8,9 @@ import {
   executeMoveCommand,
   executePlacementCommand,
   executeProductionCommand,
+  executeRepairCommand,
   executeSabotageCommand,
+  executeSellBuildingCommand,
   executeStopCommand,
   executeWorkerFishUnloadCommand,
   type PathPoint,
@@ -18,14 +20,16 @@ import { updateAiDefenseResponse } from '../../src/game/ai/aiDefenseSystem';
 import { createCombatRuntime } from '../../src/app/runtime/combatRuntime';
 import { chooseScoutUnit, createAiIntelState, mergeObservedPlayerState, scanPlayerIntel, updateAdaptiveTactic } from '../../src/game/ai/aiIntelSystem';
 import { chooseAiRaidAttacker, findAiTerritoryThreat } from '../../src/game/ai/aiPressureSystem';
+import { FIRST_SKIRMISH_COMBAT_PRESSURE } from '../../src/game/config/constants';
 import { buildingCatalog, type BuildingPlanKind } from '../../src/game/data/buildings';
 import { productionCatalog } from '../../src/game/data/production';
-import type { EntityKind, Faction, GameEntity } from '../../src/game/entities/components';
-import { createAttackBoatEntity, createBoatEntity, createEnemyAttackBoatEntity, createEnemyBoatEntity } from '../../src/game/entities/entityFactory';
+import type { DamageState, EntityKind, Faction, GameEntity } from '../../src/game/entities/components';
+import { createAttackBoatEntity, createBoatEntity, createEnemyAttackBoatEntity, createEnemyBoatEntity, createEnemyGuardEntity, createEnemyTruckEntity, createEnemyWorkerEntity, createGuardEntity, createTruckEntity, createWorkerEntity } from '../../src/game/entities/entityFactory';
 import { createSkirmishBootstrap } from '../../src/game/entities/skirmishSetup';
-import { resolveAnimationAction } from '../../src/game/render/animationState';
+import { createSaveGameSnapshot, parseSaveGameSnapshot, serializeSaveGameSnapshot } from '../../src/game/persistence/saveGame';
+import { entityAnimationFrameCount, resolveAnimationAction } from '../../src/game/render/animationState';
 import { updateAutoDefenseSystem, updateCombatAttackers } from '../../src/game/simulation/systems/combatSystem';
-import { resolveMobileUnitOverlaps } from '../../src/game/simulation/systems/collisionSystem';
+import { resolveMobileUnitOverlaps, updateTruckCrushSystem } from '../../src/game/simulation/systems/collisionSystem';
 import { destroyAssignedFactoryCrew } from '../../src/game/simulation/systems/factoryCrewSystem';
 import { resolveHarvestArrival } from '../../src/game/simulation/systems/harvestSystem';
 import { updateWorkerFishingSystem } from '../../src/game/simulation/systems/workerFishingSystem';
@@ -482,6 +486,314 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'auto metal harvest resumes field loop after unloading at factory',
+    run: () => {
+      const truck = makeEntity({
+        id: 'truck-1',
+        kind: 'truck',
+        economy: { cargo: { kind: 'metal', amount: 55, capacity: 55 }, harvesting: { fieldId: 'field-1', phase: 'returning' } },
+      });
+      const field = { id: 'field-1', kind: 'metal' as const, x: 200, y: 200, radius: 80, amount: 500, maxAmount: 500 };
+      const stockpile = { metal: 100 };
+
+      const unloaded = resolveHarvestArrival({
+        truck,
+        resourceFields: [field],
+        playerStockpile: stockpile,
+        enemyStockpile: { metal: 0 },
+        getDropOffPoint: () => ({ x: 100, y: 100 }),
+        findLandPath: straightPath,
+      });
+
+      assert.equal(unloaded.changed, true);
+      assert.equal(stockpile.metal, 155);
+      assert.equal(truck.economy?.cargo?.amount, 0);
+      assert.equal(truck.economy?.harvesting?.phase, 'to-field');
+      assert.equal(truck.moveTarget?.x, 322);
+
+      const arrived = resolveHarvestArrival({
+        truck,
+        resourceFields: [field],
+        playerStockpile: stockpile,
+        enemyStockpile: { metal: 0 },
+        loadSeconds: 0,
+        getDropOffPoint: () => ({ x: 100, y: 100 }),
+        findLandPath: straightPath,
+      });
+
+      assert.equal(arrived.changed, true);
+      assert.equal(truck.economy?.harvesting?.phase, 'loading');
+    },
+  },
+  {
+    name: 'blocked factory return preserves auto harvest intent and retries',
+    run: () => {
+      const truck = makeEntity({
+        id: 'truck-1',
+        kind: 'truck',
+        economy: { cargo: { kind: 'metal', amount: 0, capacity: 55 }, harvesting: { fieldId: 'field-1', phase: 'loading', remainingSeconds: 0 } },
+      });
+      const field = { id: 'field-1', kind: 'metal' as const, x: 200, y: 200, radius: 80, amount: 500, maxAmount: 500 };
+
+      const blocked = resolveHarvestArrival({
+        truck,
+        resourceFields: [field],
+        playerStockpile: { metal: 0 },
+        enemyStockpile: { metal: 0 },
+        getDropOffPoint: () => ({ x: 100, y: 100 }),
+        findLandPath: () => [],
+      });
+
+      assert.equal(blocked.changed, true);
+      assert.equal(truck.economy?.cargo?.amount, 55);
+      assert.equal(truck.economy?.harvesting?.phase, 'return-blocked');
+      assert.equal(truck.economy?.harvesting?.lastBlockedReason, 'factory-route');
+      assert.deepEqual(blocked.events.map((event) => event.kind), ['metalLoaded', 'returnPathBlocked']);
+
+      const retried = resolveHarvestArrival({
+        truck,
+        resourceFields: [field],
+        playerStockpile: { metal: 0 },
+        enemyStockpile: { metal: 0 },
+        deltaSeconds: 2,
+        getDropOffPoint: () => ({ x: 100, y: 100 }),
+        findLandPath: straightPath,
+      });
+
+      assert.equal(retried.changed, true);
+      assert.equal(truck.economy?.harvesting?.phase, 'returning');
+      assert.equal(truck.movement.state, 'moving');
+      assert.equal(retried.moveCommand?.pathLength, 1);
+    },
+  },
+  {
+    name: 'blocked field return after unload preserves auto harvest intent and retries',
+    run: () => {
+      const truck = makeEntity({
+        id: 'truck-1',
+        kind: 'truck',
+        economy: { cargo: { kind: 'metal', amount: 55, capacity: 55 }, harvesting: { fieldId: 'field-1', phase: 'returning' } },
+      });
+      const field = { id: 'field-1', kind: 'metal' as const, x: 200, y: 200, radius: 80, amount: 500, maxAmount: 500 };
+      const stockpile = { metal: 100 };
+
+      const blocked = resolveHarvestArrival({
+        truck,
+        resourceFields: [field],
+        playerStockpile: stockpile,
+        enemyStockpile: { metal: 0 },
+        getDropOffPoint: () => ({ x: 100, y: 100 }),
+        findLandPath: () => [],
+      });
+
+      assert.equal(blocked.changed, true);
+      assert.equal(stockpile.metal, 155);
+      assert.equal(truck.economy?.cargo?.amount, 0);
+      assert.equal(truck.economy?.harvesting?.phase, 'field-blocked');
+      assert.equal(truck.economy?.harvesting?.lastBlockedReason, 'field-route');
+      assert.deepEqual(blocked.events.map((event) => event.kind), ['metalUnloaded', 'fieldPathBlocked']);
+
+      const retried = resolveHarvestArrival({
+        truck,
+        resourceFields: [field],
+        playerStockpile: stockpile,
+        enemyStockpile: { metal: 0 },
+        deltaSeconds: 2,
+        getDropOffPoint: () => ({ x: 100, y: 100 }),
+        findLandPath: straightPath,
+      });
+
+      assert.equal(retried.changed, true);
+      assert.equal(truck.economy?.harvesting?.phase, 'to-field');
+      assert.equal(truck.movement.state, 'moving');
+      assert.equal(retried.moveCommand?.pathLength, 1);
+    },
+  },
+  {
+    name: 'manual move deliberately cancels truck auto harvest',
+    run: () => {
+      const truck = makeEntity({
+        id: 'truck-1',
+        kind: 'truck',
+        economy: { cargo: { kind: 'metal', amount: 0, capacity: 55 }, harvesting: { fieldId: 'field-1', phase: 'to-field' } },
+      });
+
+      const output = executeMoveCommand({
+        worldX: 220,
+        worldY: 220,
+        selectedUnits: [truck],
+        findLandPath: straightPath,
+        findEntityLandPath: (_entity, _start, goal) => [goal],
+        findWaterPath: straightPath,
+        isValidLandDestination: () => true,
+        isValidWaterDestination: () => true,
+      });
+
+      assert.equal(output.result?.ok, true);
+      assert.equal(truck.economy?.harvesting, undefined);
+      assert.equal(truck.movement.state, 'moving');
+    },
+  },
+  {
+    name: 'worker shore fishing uses fish animation with runtime rod frames',
+    run: () => {
+      const worker = makeEntity({
+        id: 'worker-fisher',
+        kind: 'worker',
+        economy: {
+          health: 85,
+          cargo: { kind: 'fish', amount: 0, capacity: 30 },
+          shoreFishing: { zoneId: 'cod-bank', phase: 'fishing' },
+        },
+      });
+
+      assert.equal(resolveAnimationAction(worker, testGetDamageState), 'fish');
+      assert.equal(entityAnimationFrameCount(worker, 'fish', 'humanoid'), 4);
+    },
+  },
+  {
+    name: 'moving trucks crush vulnerable human units through normal damage',
+    run: () => {
+      const truck = makeEntity({ id: 'truck-1', kind: 'truck' });
+      truck.collider = { kind: 'rect', width: 74, height: 48 };
+      truck.movement.state = 'moving';
+      truck.x = 100;
+      truck.y = 100;
+      const guard = makeEntity({ id: 'guard-1', kind: 'guard', faction: 'enemy', economy: { health: 110 } });
+      guard.x = 105;
+      guard.y = 100;
+
+      const output = updateTruckCrushSystem({
+        trucks: [truck],
+        entities: [truck, guard],
+        truckSpeeds: new Map([[truck.id, 95]]),
+        minimumCrushSpeed: 42,
+        applyDamage: testApplyDamage,
+      });
+
+      assert.equal(output.changed, true);
+      assert.equal(guard.economy?.health, 0);
+      assert.equal(guard.economy?.damageState, 'destroyed');
+      assert.deepEqual(output.events, [
+        {
+          kind: 'crush',
+          truckId: 'truck-1',
+          targetId: 'guard-1',
+          targetHealth: 0,
+          faction: 'player',
+          x: 105,
+          y: 100,
+        },
+      ]);
+    },
+  },
+  {
+    name: 'truck crush ignores stopped trucks and protected non-human targets',
+    run: () => {
+      const truck = makeEntity({ id: 'truck-1', kind: 'truck' });
+      truck.collider = { kind: 'rect', width: 74, height: 48 };
+      truck.movement.state = 'idle';
+      const worker = makeEntity({ id: 'worker-1', kind: 'worker', faction: 'enemy', economy: { health: 85 } });
+      const boat = makeEntity({ id: 'boat-1', kind: 'boat', faction: 'enemy', economy: { health: 125 } });
+      boat.x = 100;
+      boat.y = 100;
+      boat.collider = { kind: 'rect', width: 86, height: 46 };
+
+      const stopped = updateTruckCrushSystem({
+        trucks: [truck],
+        entities: [truck, worker],
+        truckSpeeds: new Map([[truck.id, 95]]),
+        minimumCrushSpeed: 42,
+        applyDamage: testApplyDamage,
+      });
+      assert.equal(stopped.changed, false);
+      assert.deepEqual(stopped.events, []);
+      assert.equal(worker.economy?.health, 85);
+
+      truck.movement.state = 'moving';
+      const crawling = updateTruckCrushSystem({
+        trucks: [truck],
+        entities: [truck, worker],
+        truckSpeeds: new Map([[truck.id, 12]]),
+        minimumCrushSpeed: 42,
+        applyDamage: testApplyDamage,
+      });
+      assert.equal(crawling.changed, false);
+      assert.deepEqual(crawling.events, []);
+      assert.equal(worker.economy?.health, 85);
+
+      const protectedTarget = updateTruckCrushSystem({
+        trucks: [truck],
+        entities: [truck, boat],
+        truckSpeeds: new Map([[truck.id, 95]]),
+        minimumCrushSpeed: 42,
+        applyDamage: testApplyDamage,
+      });
+      assert.equal(protectedTarget.changed, false);
+      assert.deepEqual(protectedTarget.events, []);
+      assert.equal(boat.economy?.health, 125);
+    },
+  },
+  {
+    name: 'manual metal unload tries alternate Factory sides before failing',
+    run: () => {
+      const truck = makeEntity({
+        id: 'truck-1',
+        kind: 'truck',
+        economy: { cargo: { kind: 'metal', amount: 30, capacity: 55 }, harvesting: { fieldId: 'field-1', phase: 'to-field' } },
+      });
+      const factory = makeEntity({ id: 'factory-1', kind: 'factory', speed: 0, layer: 'buildings', economy: { health: 1200 } });
+      factory.x = 200;
+      factory.y = 200;
+      factory.collider = { kind: 'rect', width: 100, height: 80 };
+      let pathAttempts = 0;
+
+      const output = executeMetalUnloadCommand({
+        factory,
+        selectedUnits: [truck],
+        findEntityLandPath: (_entity, _start, goal) => {
+          pathAttempts += 1;
+          return goal.x < factory.x ? [goal] : [];
+        },
+        getMetalDropOffPoint: () => ({ x: 272, y: 200 }),
+      });
+
+      assert.equal(output.result?.ok, true);
+      assert.equal(output.result?.kind, 'metalUnload');
+      assert.equal(pathAttempts > 1, true);
+      assert.equal(truck.path[0].x < factory.x, true);
+      assert.equal(truck.economy?.harvesting?.phase, 'manual-returning');
+    },
+  },
+  {
+    name: 'manual metal unload true unreachable failure preserves current loop',
+    run: () => {
+      const truck = makeEntity({
+        id: 'truck-1',
+        kind: 'truck',
+        economy: { cargo: { kind: 'metal', amount: 30, capacity: 55 }, harvesting: { fieldId: 'field-1', phase: 'to-field' } },
+      });
+      const originalEconomy = truck.economy;
+      const factory = makeEntity({ id: 'factory-1', kind: 'factory', speed: 0, layer: 'buildings', economy: { health: 1200 } });
+
+      const output = executeMetalUnloadCommand({
+        factory,
+        selectedUnits: [truck],
+        findEntityLandPath: () => [],
+        getMetalDropOffPoint: () => ({ x: 140, y: 100 }),
+      });
+
+      assert.deepEqual(output.result, {
+        ok: false,
+        kind: 'metalUnload',
+        reason: 'unreachable',
+        message: 'Metal unload rejected: no land route reaches the Factory.',
+      });
+      assert.equal(truck.economy, originalEconomy);
+      assert.deepEqual(truck.path, []);
+    },
+  },
+  {
     name: 'manual worker fish unload sends loaded workers to a friendly fish bank',
     run: () => {
       const worker = makeEntity({
@@ -503,6 +815,36 @@ const tests: TestCase[] = [
       assert.equal(worker.economy?.shoreFishing, undefined);
       assert.deepEqual(worker.economy?.unloadingFish, { targetId: 'factory-1', phase: 'to-bank' });
       assert.equal(worker.movement.state, 'moving');
+    },
+  },
+  {
+    name: 'worker repair tries alternate building sides',
+    run: () => {
+      const worker = makeEntity({ id: 'worker-1', kind: 'worker' });
+      const factory = makeEntity({ id: 'factory-1', kind: 'factory', speed: 0, layer: 'buildings', economy: { health: 600 } });
+      factory.x = 200;
+      factory.y = 200;
+      factory.collider = { kind: 'rect', width: 100, height: 80 };
+      let attempts = 0;
+
+      const output = executeRepairCommand({
+        target: factory,
+        selectedUnits: [worker],
+        findLandPath: () => [],
+        findEntityLandPath: (_entity, _start, goal) => {
+          attempts += 1;
+          return goal.y > factory.y ? [goal] : [];
+        },
+        getApproachPoint: () => ({ x: 200, y: 132 }),
+        getDamageState: () => 'damaged',
+        getMaxHealth: () => 1200,
+      });
+
+      assert.equal(output.result?.ok, true);
+      assert.equal(output.result?.kind, 'repair');
+      assert.equal(attempts > 1, true);
+      assert.equal(worker.path[0].y > factory.y, true);
+      assert.equal(worker.economy?.repair?.targetId, 'factory-1');
     },
   },
   {
@@ -593,8 +935,12 @@ const tests: TestCase[] = [
   {
     name: 'fishing boats are slower than combat boats',
     run: () => {
-      assert.equal(createBoatEntity('boat-1', 'Fishing Boat', 0, 0).movement.speed, 68);
-      assert.equal(createEnemyBoatEntity('enemy-boat-1', 'Fishing Boat', 0, 0).movement.speed, 68);
+      const playerBoat = createBoatEntity('boat-1', 'Fishing Boat', 0, 0);
+      const enemyBoat = createEnemyBoatEntity('enemy-boat-1', 'Fishing Boat', 0, 0);
+      assert.equal(playerBoat.movement.speed, 68);
+      assert.equal(playerBoat.economy?.cargo?.capacity, 45);
+      assert.equal(enemyBoat.movement.speed, 68);
+      assert.equal(enemyBoat.economy?.cargo?.capacity, 45);
       assert.equal(createAttackBoatEntity('attack-boat-1', 'Attack Boat', 0, 0).movement.speed, 78);
       assert.equal(createEnemyAttackBoatEntity('enemy-attack-boat-1', 'Attack Boat', 0, 0).movement.speed, 78);
     },
@@ -889,15 +1235,82 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'guard combat tuning lets a small raid survive long enough for player reaction',
+    run: () => {
+      const playerGuard = makeEntity({
+        id: 'guard-1',
+        kind: 'guard',
+        economy: { health: FIRST_SKIRMISH_COMBAT_PRESSURE.playerGuardHealth },
+      });
+      const firstRaider = makeEntity({
+        id: 'enemy-guard-1',
+        kind: 'guard',
+        faction: 'enemy',
+        economy: { health: FIRST_SKIRMISH_COMBAT_PRESSURE.enemyGuardHealth },
+      });
+      const secondRaider = makeEntity({
+        id: 'enemy-guard-2',
+        kind: 'guard',
+        faction: 'enemy',
+        economy: { health: FIRST_SKIRMISH_COMBAT_PRESSURE.enemyGuardHealth },
+      });
+      firstRaider.x = playerGuard.x + 42;
+      secondRaider.x = playerGuard.x + 48;
+      secondRaider.y = playerGuard.y + 18;
+
+      updateAutoDefenseSystem({
+        units: [playerGuard],
+        entities: [playerGuard, firstRaider, secondRaider],
+        getDamageState: testGetDamageState,
+        getCollisionRadius: (entity) => entity.collider.kind === 'circle' ? entity.collider.radius : 40,
+      });
+
+      assert.equal(playerGuard.economy?.attack?.damagePerSecond, FIRST_SKIRMISH_COMBAT_PRESSURE.guardDamagePerSecond);
+      const output = updateCombatAttackers({
+        attackers: [playerGuard],
+        entities: [playerGuard, firstRaider, secondRaider],
+        deltaSeconds: 3,
+        getCollisionRadius: (entity) => entity.collider.kind === 'circle' ? entity.collider.radius : 40,
+        getApproachPoint: targetPoint,
+        findLandPath: straightPath,
+        findWaterPath: straightPath,
+        applyDamage: testApplyDamage,
+      });
+
+      assert.equal(output.changed, true);
+      assert.equal(testGetDamageState(firstRaider), 'damaged');
+      assert.ok((firstRaider.economy?.health ?? 0) > 0);
+      assert.equal(testGetDamageState(secondRaider), 'healthy');
+    },
+  },
+  {
+    name: 'first-skirmish movement pacing constants remain explicit and unchanged',
+    run: () => {
+      assert.equal(createWorkerEntity('worker', 'Worker', 0, 0).movement.speed, FIRST_SKIRMISH_COMBAT_PRESSURE.movementSpeeds.worker);
+      assert.equal(createGuardEntity('guard', 'Guard', 0, 0).movement.speed, FIRST_SKIRMISH_COMBAT_PRESSURE.movementSpeeds.guard);
+      assert.equal(createTruckEntity('truck', 'Truck', 0, 0).movement.speed, FIRST_SKIRMISH_COMBAT_PRESSURE.movementSpeeds.truck);
+      assert.equal(createEnemyWorkerEntity('enemy-worker', 'Worker', 0, 0).movement.speed, FIRST_SKIRMISH_COMBAT_PRESSURE.movementSpeeds.enemyWorker);
+      assert.equal(createEnemyGuardEntity('enemy-guard', 'Guard', 0, 0).movement.speed, FIRST_SKIRMISH_COMBAT_PRESSURE.movementSpeeds.enemyGuard);
+      assert.equal(createEnemyTruckEntity('enemy-truck', 'Truck', 0, 0).movement.speed, FIRST_SKIRMISH_COMBAT_PRESSURE.movementSpeeds.enemyTruck);
+      assert.equal(createBoatEntity('boat', 'Boat', 0, 0).movement.speed, FIRST_SKIRMISH_COMBAT_PRESSURE.movementSpeeds.fishingBoat);
+      assert.equal(createAttackBoatEntity('attack-boat', 'Attack Boat', 0, 0).movement.speed, FIRST_SKIRMISH_COMBAT_PRESSURE.movementSpeeds.attackBoat);
+    },
+  },
+  {
     name: 'enemy raid combat damages player target and raises player warning',
     run: () => {
-      const guard = makeEntity({ id: 'enemy-guard-1', kind: 'guard', faction: 'enemy', economy: { health: 110 } });
+      const guard = makeEntity({ id: 'enemy-guard-1', kind: 'guard', faction: 'enemy', economy: { health: FIRST_SKIRMISH_COMBAT_PRESSURE.enemyGuardHealth } });
       const truck = makeEntity({ id: 'truck-1', kind: 'truck', faction: 'player', economy: { health: 140 } });
       guard.x = truck.x + 60;
       guard.y = truck.y;
       guard.economy = {
         ...guard.economy,
-        attack: { targetId: truck.id, phase: 'attacking', damagePerSecond: 24, range: 90 },
+        attack: {
+          targetId: truck.id,
+          phase: 'attacking',
+          damagePerSecond: FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidGuardDamagePerSecond,
+          range: FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidGuardAttackRange,
+        },
       };
       const entities = [guard, truck];
       const warnings: Array<{ targetId: string; phase: 'incoming' | 'damaged' | 'destroyed' }> = [];
@@ -944,7 +1357,7 @@ const tests: TestCase[] = [
       const changed = runtime.updateAiRaidActive(1, {} as never);
 
       assert.equal(changed, true);
-      assert.equal(truck.economy?.health, 116);
+      assert.equal(truck.economy?.health, 140 - FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidGuardDamagePerSecond);
       assert.equal(aiController.lastRaidEvent?.kind, 'damaged');
       assert.equal(aiController.lastRaidEvent?.attackerId, 'enemy-guard-1');
       assert.deepEqual(warnings, [
@@ -972,7 +1385,7 @@ const tests: TestCase[] = [
     },
   },
   {
-    name: 'skirmish starts both sides with command center, three workers, and one truck',
+    name: 'skirmish starts both sides with command center, workers, and opening military pressure',
     run: () => {
       const bootstrap = createSkirmishBootstrap();
       const playerUnits = bootstrap.entities.filter((entity) => entity.faction === 'player');
@@ -984,7 +1397,11 @@ const tests: TestCase[] = [
       assert.equal(enemyUnits.filter((entity) => entity.kind === 'worker').length, 3);
       assert.equal(playerUnits.filter((entity) => entity.kind === 'truck').length, 1);
       assert.equal(enemyUnits.filter((entity) => entity.kind === 'truck').length, 1);
-      assert.equal(playerUnits.some((entity) => entity.kind === 'guard' || entity.kind === 'saboteur'), false);
+      assert.equal(playerUnits.some((entity) => entity.kind === 'dock'), false);
+      assert.equal(playerUnits.filter((entity) => entity.kind === 'guard').length, 1);
+      assert.equal(enemyUnits.filter((entity) => entity.kind === 'guard').length, 1);
+      assert.equal(enemyUnits.find((entity) => entity.id === 'enemy-guard-1')?.economy?.health, FIRST_SKIRMISH_COMBAT_PRESSURE.enemyGuardHealth);
+      assert.equal(playerUnits.some((entity) => entity.kind === 'saboteur'), false);
       assert.deepEqual(bootstrap.economyState, { metal: 320, cash: 120 });
       assert.deepEqual(bootstrap.aiEconomyState, { metal: 320, cash: 120 });
     },
@@ -1021,6 +1438,191 @@ const tests: TestCase[] = [
       assert.equal(state.tickCount, 1);
       assert.equal(state.lastTickDeltaSeconds, 0.1);
       assert.ok(Math.abs(state.startDelaySeconds - 0.2) < 0.0001);
+    },
+  },
+  {
+    name: 'save game snapshot round-trips versioned gameplay state',
+    run: () => {
+      const bootstrap = createSkirmishBootstrap();
+      const snapshot = createSaveGameSnapshot({
+        appVersion: 'test',
+        simulationClockSeconds: 12.5,
+        entities: bootstrap.entities,
+        resourceFields: bootstrap.resourceFields,
+        fishingZoneStates: bootstrap.fishingZoneStates,
+        economyState: bootstrap.economyState,
+        aiEconomyState: bootstrap.aiEconomyState,
+        matchState: bootstrap.matchState,
+        matchStats: bootstrap.matchStats,
+        crewState: bootstrap.crewState,
+        aiController: makeAiControllerState(),
+        aiDefenseState: { threatCount: 1, defensiveStructureBuilt: false },
+      });
+
+      const parsed = parseSaveGameSnapshot(serializeSaveGameSnapshot(snapshot));
+      assert.equal(parsed.ok, true);
+      if (parsed.ok) {
+        assert.equal(parsed.snapshot.schemaVersion, 1);
+        assert.equal(parsed.snapshot.simulationClockSeconds, 12.5);
+        assert.equal(parsed.snapshot.entities.length, bootstrap.entities.length);
+        assert.equal(parsed.snapshot.aiDefenseState.threatCount, 1);
+      }
+    },
+  },
+  {
+    name: 'save game parser rejects corrupt and incompatible snapshots',
+    run: () => {
+      assert.deepEqual(parseSaveGameSnapshot('{'), {
+        ok: false,
+        reason: 'invalid-json',
+        message: 'Save file is not valid JSON.',
+      });
+      assert.deepEqual(parseSaveGameSnapshot(JSON.stringify({ schemaVersion: 999 })), {
+        ok: false,
+        reason: 'incompatible',
+        message: 'Save file uses an incompatible schema version.',
+      });
+      assert.deepEqual(parseSaveGameSnapshot(JSON.stringify({ schemaVersion: 1 })), {
+        ok: false,
+        reason: 'invalid-schema',
+        message: 'Save file is missing required gameplay state.',
+      });
+    },
+  },
+  {
+    name: 'sell building refunds completed friendly support buildings once',
+    run: () => {
+      const house = makeEntity({
+        id: 'house-1',
+        kind: 'house',
+        speed: 0,
+        layer: 'buildings',
+        economy: {
+          health: buildingCatalog.house.health,
+          construction: {
+            building: 'house',
+            progressSeconds: buildingCatalog.house.seconds,
+            totalSeconds: buildingCatalog.house.seconds,
+            complete: true,
+            capacityBonus: buildingCatalog.house.capacityBonus,
+          },
+        },
+      });
+      const stockpile = { metal: 10, cash: 0 };
+      const crew = { capacity: 18 };
+
+      const sold = executeSellBuildingCommand({
+        building: house,
+        stockpile,
+        crewState: crew,
+        entities: [house],
+        getDamageState: testGetDamageState,
+      });
+
+      assert.deepEqual(sold, {
+        ok: true,
+        kind: 'sellBuilding',
+        building: 'house',
+        refundMetal: 45,
+        refundCash: 0,
+        message: 'house-1 sold for 45 metal.',
+      });
+      assert.equal(stockpile.metal, 55);
+      assert.equal(crew.capacity, 10);
+      assert.equal(house.economy?.health, 0);
+      assert.equal(house.economy?.damageState, 'destroyed');
+      assert.equal(house.economy?.destruction?.remainingSeconds, 0.45);
+
+      const duplicate = executeSellBuildingCommand({
+        building: house,
+        stockpile,
+        crewState: crew,
+        entities: [house],
+        getDamageState: testGetDamageState,
+      });
+
+      assert.equal(duplicate.ok, false);
+      assert.equal(duplicate.kind, 'sellBuilding');
+      assert.equal(duplicate.reason, 'already-destroyed');
+      assert.equal(stockpile.metal, 55);
+      assert.equal(crew.capacity, 10);
+    },
+  },
+  {
+    name: 'sell building rejects protected, enemy, and under-construction structures',
+    run: () => {
+      const stockpile = { metal: 100, cash: 0 };
+      const factory = makeEntity({ id: 'factory-1', kind: 'factory', speed: 0, layer: 'buildings', economy: { health: 1200 } });
+      const enemyTower = makeEntity({ id: 'enemy-tower', kind: 'guardTower', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 520 } });
+      const site = makeConstructionSite('dock-site', 'dock', 'worker-1');
+
+      assert.deepEqual(executeSellBuildingCommand({ building: factory, stockpile, getDamageState: testGetDamageState }), {
+        ok: false,
+        kind: 'sellBuilding',
+        reason: 'protected-core',
+        message: 'Sell rejected: the Factory Command Center is protected.',
+      });
+      assert.deepEqual(executeSellBuildingCommand({ building: enemyTower, stockpile, getDamageState: testGetDamageState }), {
+        ok: false,
+        kind: 'sellBuilding',
+        reason: 'no-selection',
+        message: 'Select a completed friendly building before issuing Sell.',
+      });
+      assert.deepEqual(executeSellBuildingCommand({ building: site, stockpile, getDamageState: testGetDamageState }), {
+        ok: false,
+        kind: 'sellBuilding',
+        reason: 'under-construction',
+        message: 'Sell rejected: finish construction before selling the building.',
+      });
+      assert.equal(stockpile.metal, 100);
+    },
+  },
+  {
+    name: 'selling a dock clears dependent boat orders and the building footprint',
+    run: () => {
+      const dock = makeEntity({
+        id: 'dock-1',
+        kind: 'dock',
+        speed: 0,
+        layer: 'buildings',
+        economy: {
+          health: buildingCatalog.dock.health,
+          productionQueue: [{ id: 'boat-1', product: 'boat', remainingSeconds: 5, totalSeconds: 10, cost: 100 }],
+          construction: {
+            building: 'dock',
+            progressSeconds: buildingCatalog.dock.seconds,
+            totalSeconds: buildingCatalog.dock.seconds,
+            complete: true,
+            capacityBonus: 0,
+          },
+          rallyPoint: { x: 200, y: 200, mode: 'water' },
+        },
+      });
+      const boat = makeEntity({
+        id: 'boat-1',
+        kind: 'boat',
+        economy: { health: 125, unloadingFish: { targetId: 'dock-1', phase: 'to-dock' } },
+      });
+      boat.path = [{ x: 200, y: 200 }];
+      boat.moveTarget = boat.path[0];
+      boat.movement.state = 'moving';
+      const stockpile = { metal: 0, cash: 0 };
+
+      const sold = executeSellBuildingCommand({
+        building: dock,
+        stockpile,
+        entities: [dock, boat],
+        getDamageState: testGetDamageState,
+      });
+
+      assert.equal(sold.ok, true);
+      assert.equal(stockpile.metal, 60);
+      assert.equal(dock.economy?.productionQueue, undefined);
+      assert.equal(dock.economy?.rallyPoint, undefined);
+      assert.equal(dock.economy?.health, 0);
+      assert.equal(boat.economy?.unloadingFish, undefined);
+      assert.equal(boat.movement.state, 'idle');
+      assert.deepEqual(boat.path, []);
     },
   },
   {
@@ -1210,6 +1812,47 @@ const tests: TestCase[] = [
 
       assert.equal(changed, true);
       assert.deepEqual(queued, ['guard']);
+    },
+  },
+  {
+    name: 'AI raid attempts retry when no attacker can receive a valid order',
+    run: () => {
+      const state = makeAiControllerState({
+        openingComplete: true,
+        raidDelaySeconds: 0,
+        raidIssued: false,
+      });
+      let raidAttempts = 0;
+      const input = {
+        deltaSeconds: 0.1,
+        state,
+        entities: [
+          makeEntity({ id: 'enemy-factory', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 1200 } }),
+          makeEntity({ id: 'enemy-guard-1', kind: 'guard', faction: 'enemy' }),
+        ],
+        availableMetal: 0,
+        availableCash: 0,
+        getDamageState: () => 'healthy' as DamageState,
+        tryIssueHarvest: () => false,
+        queueProduction: () => false,
+        buildDock: () => false,
+        buildBarracks: () => false,
+        updateProduction: () => false,
+        updateFishing: () => false,
+        updateBoatRepair: () => false,
+        respondToThreat: () => false,
+        issueRaid: () => {
+          raidAttempts += 1;
+          return false;
+        },
+        updateRaid: () => false,
+      };
+
+      assert.equal(tickAiCoordinator(input), false);
+      assert.equal(tickAiCoordinator(input), false);
+      assert.equal(raidAttempts, 2);
+      assert.equal(state.raidIssued, false);
+      assert.equal(state.raidDelaySeconds, 0);
     },
   },
   {
@@ -1503,7 +2146,7 @@ const tests: TestCase[] = [
       const entities = [
         makeEntity({ id: 'player-factory', kind: 'factory', speed: 0, layer: 'buildings', economy: { health: 1200 } }),
         makeEntity({ id: 'player-dock', kind: 'dock', speed: 0, layer: 'buildings', economy: { health: 800 } }),
-        makeEntity({ id: 'player-boat', kind: 'boat', speed: 0, economy: { health: 220, cargo: { kind: 'fish', amount: 0, capacity: 80 } } }),
+        makeEntity({ id: 'player-boat', kind: 'boat', speed: 0, economy: { health: 220, cargo: { kind: 'fish', amount: 0, capacity: 45 } } }),
         makeEntity({ id: 'enemy-factory', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 900 } }),
       ];
       const result = evaluateWinCondition({
@@ -1664,6 +2307,24 @@ function makeEntity(input: {
     animation: { state: 'idle', frame: 0 },
     renderable: { layer, tint: 0xffffff, hidden: input.hidden },
   };
+}
+
+function testApplyDamage(target: GameEntity, amount: number): DamageState | undefined {
+  const currentHealth = target.economy?.health;
+  if (currentHealth === undefined) {
+    return undefined;
+  }
+  const nextHealth = Math.max(0, currentHealth - amount);
+  const damageState = nextHealth <= 0 ? 'destroyed' : nextHealth <= currentHealth * 0.65 ? 'damaged' : 'healthy';
+  target.economy = { ...target.economy, health: nextHealth, damageState };
+  return damageState;
+}
+
+function testGetDamageState(entity: GameEntity): DamageState | undefined {
+  const health = entity.economy?.health;
+  if (health === undefined) return undefined;
+  if (health <= 0) return 'destroyed';
+  return entity.economy?.damageState ?? 'healthy';
 }
 
 function makeConstructionSite(id: string, building: BuildingPlanKind, builderId: string): GameEntity {

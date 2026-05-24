@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 8-5-persist-settings
 epic: 8
 story: 5
@@ -63,3 +63,10 @@ Music and SFX volume settings now persist across reloads and apply immediately t
 ## Change Log
 
 - 2026-05-16: Implemented Story 8.5 persisted music/SFX volume settings and tests.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Verified music/SFX volume localStorage restoration with focused persistence e2e plus typecheck.

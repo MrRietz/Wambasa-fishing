@@ -4,8 +4,11 @@ import { skirmish01MapData } from '../data/maps/skirmish01';
 import type { MatchState, MatchStats, GameEntity } from './components';
 import type { CoastalMapData, FishingZoneState, ResourceField } from '../map/mapTypes';
 import {
+  createEnemyAttackBoatEntity,
+  createEnemyGuardEntity,
   createEnemyTruckEntity,
   createEnemyWorkerEntity,
+  createGuardEntity,
   createTruckEntity,
   createWorkerEntity,
 } from './entityFactory';
@@ -35,13 +38,16 @@ const metalFieldCapacities: Record<string, number> = {
 
 export function createSkirmishBootstrap(): SkirmishBootstrap {
   const mapData = skirmish01MapData;
-  const fishingZoneStates: FishingZoneState[] = mapData.fishingZones.map((zone) => ({
-    ...zone,
-    amount: zone.shoreAccess ? 200 : 500,
-    maxFish: zone.shoreAccess ? 200 : 500,
-    regrowthPerSecond: Math.max(zone.regrowthPerSecond ?? 8, zone.shoreAccess ? 12 : 20),
-    depletedCooldownSeconds: 0,
-  }));
+  const fishingZoneStates: FishingZoneState[] = mapData.fishingZones.map((zone) => {
+    const maxFish = zone.maxFish ?? (zone.shoreAccess ? 200 : 500);
+    return {
+      ...zone,
+      amount: maxFish,
+      maxFish,
+      regrowthPerSecond: zone.regrowthPerSecond ?? (zone.shoreAccess ? 12 : 20),
+      depletedCooldownSeconds: 0,
+    };
+  });
 
   const resourceFields: ResourceField[] = mapData.metalFields.map((field) => ({
     ...field,
@@ -117,10 +123,13 @@ export function createSkirmishBootstrap(): SkirmishBootstrap {
       createEnemyWorkerEntity('enemy-worker-2', 'Worker', 6160, 1010),
       createEnemyWorkerEntity('enemy-worker-3', 'Worker', 6240, 970),
       createEnemyTruckEntity('enemy-truck-1', 'Hauler', 6500, 1110),
+      createEnemyGuardEntity('enemy-guard-1', 'Guard', 6040, 760),
+      createEnemyAttackBoatEntity('enemy-skiff', 'Skiff', 2705, 438),
       createWorkerEntity('worker-1', 'Dockyard Worker', 760, 1000),
       createWorkerEntity('worker-2', 'Factory Worker', 850, 695),
       createWorkerEntity('worker-3', 'Harbor Worker', 920, 1000),
       createTruckEntity('truck-1', 'Metal Hauler', 480, 917),
+      createGuardEntity('guard-1', 'Harbor Guard', 1480, 705),
     ],
   };
 }

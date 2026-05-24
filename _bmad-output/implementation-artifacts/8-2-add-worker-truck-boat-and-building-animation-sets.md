@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 8-2-add-worker-truck-boat-and-building-animation-sets
 epic: 8
 story: 2
@@ -64,3 +64,10 @@ Core entities now expose and render distinct animation profiles. Workers/guards/
 ## Change Log
 
 - 2026-05-16: Implemented Story 8.2 profile-based animation sets and regression coverage.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Verified animation profile coverage with focused Guard Tower and fishing-boat e2e slice plus production build.

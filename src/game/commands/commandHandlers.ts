@@ -205,6 +205,14 @@ export interface InstantBuildCommandOutput {
   building?: GameEntity;
 }
 
+export interface SellBuildingCommandInput {
+  building: GameEntity | null;
+  stockpile: EconomyStockpile;
+  crewState?: { capacity: number };
+  entities?: GameEntity[];
+  getDamageState: (entity: GameEntity) => DamageState | undefined;
+}
+
 export interface AttackCommandInput {
   target: GameEntity;
   selectedUnits: GameEntity[];
@@ -308,6 +316,7 @@ export function executeMoveCommand(input: MoveCommandInput): TargetCommandOutput
       shoreFishing: undefined,
       unloadingFish: entity.kind === 'worker' ? undefined : entity.economy?.unloadingFish,
       autoFishZoneId: entity.kind === 'worker' ? undefined : entity.economy?.autoFishZoneId,
+      harvesting: entity.kind === 'truck' ? undefined : entity.economy?.harvesting,
       buildJob: undefined,
       buildQueue: entity.kind === 'worker' ? undefined : entity.economy?.buildQueue,
       guardOrder: undefined,
@@ -806,8 +815,7 @@ export function executeMetalUnloadCommand(input: MetalUnloadCommandInput): Targe
 
   const plannedMoves = loadedTrucks.map((entity) => {
     const target = input.getMetalDropOffPoint(entity);
-    const path = input.findEntityLandPath(entity, { x: entity.x, y: entity.y }, target);
-    return { entity, path, target };
+    return planEntityPathToInteractionTarget(entity, { x: entity.x, y: entity.y }, target, input.factory, input.findEntityLandPath);
   });
   if (plannedMoves.some((move) => move.path.length === 0)) {
     return {
@@ -859,8 +867,7 @@ export function executeWorkerFishUnloadCommand(input: WorkerFishUnloadCommandInp
 
   const plannedMoves = loadedWorkers.map((entity) => {
     const target = input.getWorkerFishDropOffPoint(input.bank, entity);
-    const path = input.findEntityLandPath(entity, { x: entity.x, y: entity.y }, target);
-    return { entity, path, target };
+    return planEntityPathToInteractionTarget(entity, { x: entity.x, y: entity.y }, target, input.bank, input.findEntityLandPath);
   });
   if (plannedMoves.some((move) => move.path.length === 0)) {
     return {
@@ -1128,8 +1135,14 @@ export function executeAttackCommand(input: AttackCommandInput): TargetCommandOu
 
   const landOrders = landAttackers.map((attacker, index) => {
     const targetPoint = input.getApproachPoint(input.target, index, landAttackers.length);
-    const path = input.findEntityLandPath?.(attacker, { x: attacker.x, y: attacker.y }, targetPoint) ?? input.findLandPath({ x: attacker.x, y: attacker.y }, targetPoint);
-    return { attacker, path };
+    const route = planEntityPathToInteractionTarget(
+      attacker,
+      { x: attacker.x, y: attacker.y },
+      targetPoint,
+      input.target,
+      (entity, start, goal) => input.findEntityLandPath?.(entity, start, goal) ?? input.findLandPath(start, goal),
+    );
+    return { attacker, path: route.path, target: route.target };
   });
 
   if (landAttackers.length > 0 && landOrders.some((order) => order.path.length === 0)) {
@@ -1325,8 +1338,14 @@ function executeTargetUnitCommand(input: TargetUnitCommandInput): TargetCommandO
 
   const plannedOrders = input.selectedUnits.map((unit, index) => {
     const targetPoint = input.getApproachPoint(input.target, index, input.selectedUnits.length);
-    const path = input.findEntityLandPath?.(unit, { x: unit.x, y: unit.y }, targetPoint) ?? input.findLandPath({ x: unit.x, y: unit.y }, targetPoint);
-    return { unit, path };
+    const route = planEntityPathToInteractionTarget(
+      unit,
+      { x: unit.x, y: unit.y },
+      targetPoint,
+      input.target,
+      (entity, start, goal) => input.findEntityLandPath?.(entity, start, goal) ?? input.findLandPath(start, goal),
+    );
+    return { unit, path: route.path, target: route.target };
   });
 
   if (plannedOrders.some((order) => order.path.length === 0)) {
@@ -1340,12 +1359,178 @@ function executeTargetUnitCommand(input: TargetUnitCommandInput): TargetCommandO
     handled: true,
     result: input.successResult(longestPath, input.selectedUnits),
     moveCommand: {
-      x: input.target.x,
-      y: input.target.y,
+      x: plannedOrders[0]?.target.x ?? input.target.x,
+      y: plannedOrders[0]?.target.y ?? input.target.y,
       entityIds: input.selectedUnits.map((unit) => unit.id),
       pathLength: longestPath,
     },
   };
+}
+
+export function executeSellBuildingCommand(input: SellBuildingCommandInput): CommandResult {
+  const building = input.building;
+  if (!building || building.faction !== 'player' || building.renderable.layer !== 'buildings') {
+    return {
+      ok: false,
+      kind: 'sellBuilding',
+      reason: 'no-selection',
+      message: 'Select a completed friendly building before issuing Sell.',
+    };
+  }
+
+  if (!isBuildingPlanKind(building.kind)) {
+    return {
+      ok: false,
+      kind: 'sellBuilding',
+      reason: 'unsupported-target',
+      message: 'Sell rejected: that structure cannot be sold.',
+    };
+  }
+
+  const definition = buildingCatalog[building.kind];
+  if (!definition.sellable) {
+    return {
+      ok: false,
+      kind: 'sellBuilding',
+      reason: 'protected-core',
+      message: 'Sell rejected: the Factory Command Center is protected.',
+    };
+  }
+
+  if (input.getDamageState(building) === 'destroyed' || building.economy?.destruction) {
+    return {
+      ok: false,
+      kind: 'sellBuilding',
+      reason: 'already-destroyed',
+      message: 'Sell rejected: that building is already being removed.',
+    };
+  }
+
+  const construction = building.economy?.construction;
+  if (construction && !construction.complete) {
+    return {
+      ok: false,
+      kind: 'sellBuilding',
+      reason: 'under-construction',
+      message: 'Sell rejected: finish construction before selling the building.',
+    };
+  }
+
+  const refundMetal = Math.floor(definition.cost * definition.refundRate);
+  const refundCash = 0;
+  input.stockpile.metal += refundMetal;
+  input.stockpile.cash += refundCash;
+  if (input.crewState && definition.capacityBonus > 0) {
+    input.crewState.capacity = Math.max(10, input.crewState.capacity - definition.capacityBonus);
+  }
+
+  building.commandable = false;
+  building.movement.state = 'idle';
+  building.moveTarget = undefined;
+  building.path = [];
+  building.economy = {
+    ...building.economy,
+    health: 0,
+    damageState: 'destroyed',
+    productionQueue: undefined,
+    dropOff: undefined,
+    rallyPoint: undefined,
+    reelWorkshop: undefined,
+    technologyLab: undefined,
+    attack: undefined,
+    disabledSeconds: undefined,
+    destruction: { phase: 'vanishing', remainingSeconds: 0.45, totalSeconds: 0.45 },
+  };
+  clearOrdersTargetingSoldBuilding(building, input.entities ?? []);
+
+  return {
+    ok: true,
+    kind: 'sellBuilding',
+    building: building.kind,
+    refundMetal,
+    refundCash,
+    message: `${building.name} sold for ${refundMetal} metal.`,
+  };
+}
+
+function planEntityPathToInteractionTarget(
+  entity: GameEntity,
+  start: PathPoint,
+  primaryTarget: PathPoint,
+  interactionEntity: GameEntity,
+  findEntityLandPath: (entity: GameEntity, start: PathPoint, goal: PathPoint) => PathPoint[],
+): { entity: GameEntity; path: PathPoint[]; target: PathPoint } {
+  for (const target of getEntityInteractionTargets(interactionEntity, primaryTarget, entity)) {
+    const path = findEntityLandPath(entity, start, target);
+    if (path.length > 0) {
+      return { entity, path, target };
+    }
+  }
+  return { entity, path: [], target: primaryTarget };
+}
+
+function getEntityInteractionTargets(target: GameEntity, primaryTarget: PathPoint, actor?: GameEntity): PathPoint[] {
+  const candidates: PathPoint[] = [primaryTarget];
+  const actorRadius = actor?.collider.kind === 'circle' ? actor.collider.radius : 18;
+
+  if (target.collider.kind === 'rect') {
+    const halfWidth = target.collider.width / 2;
+    const halfHeight = target.collider.height / 2;
+    const margin = Math.max(34, actorRadius + 20);
+    const inset = Math.max(18, actorRadius * 0.75);
+    const sides = orderEntitySidesByPoint(target, primaryTarget);
+    const distances = [margin, margin + 28, margin + 60];
+    const lateralOffsets = [0, -0.34, 0.34, -0.68, 0.68];
+
+    for (const distance of distances) {
+      for (const side of sides) {
+        for (const lateral of lateralOffsets) {
+          if (side === 'north' || side === 'south') {
+            candidates.push({
+              x: clamp(target.x + halfWidth * lateral, target.x - halfWidth + inset, target.x + halfWidth - inset),
+              y: side === 'north' ? target.y - halfHeight - distance : target.y + halfHeight + distance,
+            });
+          } else {
+            candidates.push({
+              x: side === 'east' ? target.x + halfWidth + distance : target.x - halfWidth - distance,
+              y: clamp(target.y + halfHeight * lateral, target.y - halfHeight + inset, target.y + halfHeight - inset),
+            });
+          }
+        }
+      }
+    }
+  } else {
+    const radius = target.collider.radius + actorRadius + 20;
+    const baseAngle = Math.atan2(primaryTarget.y - target.y, primaryTarget.x - target.x);
+    for (const distance of [radius, radius + 28, radius + 60]) {
+      for (const offset of [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, Math.PI]) {
+        candidates.push({
+          x: target.x + Math.cos(baseAngle + offset) * distance,
+          y: target.y + Math.sin(baseAngle + offset) * distance,
+        });
+      }
+    }
+  }
+
+  return uniquePathPoints(candidates).map((point) => ({
+    x: clamp(point.x, 40, WORLD_WIDTH - 40),
+    y: clamp(point.y, 40, WORLD_HEIGHT - 40),
+  }));
+}
+
+function orderEntitySidesByPoint(target: GameEntity, point: PathPoint): Array<'north' | 'south' | 'east' | 'west'> {
+  const dx = point.x - target.x;
+  const dy = point.y - target.y;
+  const primary = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'east' : 'west') : (dy >= 0 ? 'south' : 'north');
+  return [primary, ...(['north', 'south', 'east', 'west'] as const).filter((side) => side !== primary)];
+}
+
+function uniquePathPoints(points: PathPoint[]): PathPoint[] {
+  const unique = new Map<string, PathPoint>();
+  for (const point of points) {
+    unique.set(`${Math.round(point.x)}:${Math.round(point.y)}`, point);
+  }
+  return [...unique.values()];
 }
 
 function planLandFormationMoves(
@@ -1435,6 +1620,54 @@ function isSelectedCommandableKind(entity: GameEntity, kind: EntityKind): boolea
 
 function isSelectedLandAttacker(entity: GameEntity): boolean {
   return (entity.kind === 'worker' || entity.kind === 'guard') && entity.faction === 'player' && entity.commandable && entity.movement.speed > 0;
+}
+
+function isBuildingPlanKind(kind: GameEntity['kind']): kind is BuildingPlanKind {
+  return kind === 'house' || kind === 'dock' || kind === 'guardTower' || kind === 'techLab' || kind === 'barracks' || kind === 'factory';
+}
+
+function clearOrdersTargetingSoldBuilding(building: GameEntity, entities: GameEntity[]): void {
+  for (const entity of entities) {
+    if (entity.id === building.id) {
+      continue;
+    }
+    let economy = entity.economy;
+    if (!economy) {
+      continue;
+    }
+    const shouldClearDockRepair = economy.dockRepair?.dockId === building.id;
+    const shouldClearFishUnload = economy.unloadingFish?.targetId === building.id;
+    const shouldClearWorkerRepair = economy.repair?.targetId === building.id;
+    const shouldClearSabotage = economy.sabotage?.targetId === building.id;
+    const shouldClearAttack = economy.attack?.targetId === building.id;
+    const shouldClearBuildJob = economy.buildJob?.siteId === building.id;
+    const shouldClearFactoryDuty = economy.factoryDuty?.factoryId === building.id;
+    if (
+      !shouldClearDockRepair &&
+      !shouldClearFishUnload &&
+      !shouldClearWorkerRepair &&
+      !shouldClearSabotage &&
+      !shouldClearAttack &&
+      !shouldClearBuildJob &&
+      !shouldClearFactoryDuty
+    ) {
+      continue;
+    }
+    entity.path = [];
+    entity.moveTarget = undefined;
+    entity.movement.state = 'idle';
+    economy = {
+      ...economy,
+      dockRepair: shouldClearDockRepair ? undefined : economy.dockRepair,
+      unloadingFish: shouldClearFishUnload ? undefined : economy.unloadingFish,
+      repair: shouldClearWorkerRepair ? undefined : economy.repair,
+      sabotage: shouldClearSabotage ? undefined : economy.sabotage,
+      attack: shouldClearAttack ? undefined : economy.attack,
+      buildJob: shouldClearBuildJob ? undefined : economy.buildJob,
+      factoryDuty: shouldClearFactoryDuty ? undefined : economy.factoryDuty,
+    };
+    entity.economy = economy;
+  }
 }
 
 function getLandAttackStats(attacker: GameEntity, target: GameEntity): { damagePerSecond: number; range: number } {

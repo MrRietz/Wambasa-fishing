@@ -335,6 +335,39 @@ export function renderTacticalCommandPanel(
   elements.attackMoveButtonElement.disabled = guards.length === 0;
 }
 
+export function renderBuildingCommandPanel(
+  elements: Pick<RtsDomElements, 'buildingCommandsElement' | 'sellBuildingButtonElement'>,
+  building: GameEntity | null,
+  getDamageState: (entity: GameEntity) => DamageState | undefined,
+): void {
+  elements.buildingCommandsElement.hidden = !building;
+  if (!building) {
+    return;
+  }
+  const buildingKind = isBuildingPlanKind(building.kind) ? building.kind : undefined;
+  const definition = buildingKind ? buildingCatalog[buildingKind] : undefined;
+  const underConstruction = Boolean(building.economy?.construction && !building.economy.construction.complete);
+  const destroyed = getDamageState(building) === 'destroyed' || Boolean(building.economy?.destruction);
+  const sellable = Boolean(definition?.sellable) && !underConstruction && !destroyed && building.commandable;
+  const refund = definition ? Math.floor(definition.cost * definition.refundRate) : 0;
+  const reason =
+    !definition?.sellable
+      ? 'protected'
+      : underConstruction
+        ? 'building'
+        : destroyed
+          ? 'removed'
+          : `${refund} metal`;
+  elements.sellBuildingButtonElement.disabled = !sellable;
+  elements.sellBuildingButtonElement.title = sellable ? `Sell for ${refund} metal` : 'This building cannot be sold right now';
+  elements.sellBuildingButtonElement.setAttribute('aria-label', sellable ? `Sell ${building.name} for ${refund} metal` : `Sell unavailable for ${building.name}`);
+  elements.sellBuildingButtonElement.innerHTML = `Sell<br><span>${reason}</span>`;
+}
+
+function isBuildingPlanKind(kind: GameEntity['kind']): kind is keyof typeof buildingCatalog {
+  return kind === 'house' || kind === 'dock' || kind === 'guardTower' || kind === 'techLab' || kind === 'barracks' || kind === 'factory';
+}
+
 function renderMatchResultSummary(resultSummaryElement: HTMLDListElement, matchStats: MatchStats): void {
   resultSummaryElement.replaceChildren();
   const rows: Array<[string, number]> = [
@@ -613,6 +646,9 @@ function getEntityStatRows(
     const damageState = getDamageState(entity);
     stats.push(`HP ${Math.ceil(entity.economy.health)}${damageState && damageState !== 'healthy' ? ` ${damageState}` : ''}`);
   }
+  if (entity.kind === 'guardTower') {
+    stats.push(`Range ${GUARD_TOWER_RANGE}`);
+  }
   if (entity.economy?.cargo) {
     stats.push(`Cargo ${entity.economy.cargo.amount}/${entity.economy.cargo.capacity}`);
   }
@@ -624,7 +660,7 @@ function getEntityStatRows(
         : undefined;
   if (fishingZone) {
     stats.push(fishingZone.label);
-    stats.push(`${fishingZone.cashPerFish} cash/fish`);
+    stats.push(`${formatFishingZoneTier(fishingZone.tier)} | ${fishingZone.cashPerFish} cash/fish`);
   }
   if (entity.economy?.productionQueue) {
     stats.push(`Queue ${entity.economy.productionQueue.length}`);
@@ -777,9 +813,13 @@ function syncProductionButton(
     : lacksMetal || lacksCash
       ? `Need ${formatProductionCostShortfall(definition, economy)}`
       : costLabel;
-  button.setAttribute('aria-label', `${label} - ${reason}`);
+  button.setAttribute('aria-label', `Build ${label} - ${reason}`);
   button.title = `${label} - ${reason}`;
   button.innerHTML = `${label}<br><span>${reason}</span>`;
+}
+
+function formatFishingZoneTier(tier: FishingZoneData['tier']): string {
+  return tier === 'contested' ? 'Contested waters' : 'Safe waters';
 }
 
 function formatProductionCostShortfall(

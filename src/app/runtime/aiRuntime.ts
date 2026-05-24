@@ -6,6 +6,7 @@ import {
   type MoveCommandSummary,
 } from '../../game/commands/commandHandlers';
 import { buildingCatalog, type BuildingPlanKind } from '../../game/data/buildings';
+import { FIRST_SKIRMISH_COMBAT_PRESSURE } from '../../game/config/constants';
 import type { ProductionKind } from '../../game/data/production';
 import { productionCatalog } from '../../game/data/production';
 import type { DamageState, GameEntity } from '../../game/entities/components';
@@ -319,7 +320,7 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     return buildAiStructure({
       building: 'barracks',
       id: nextEnemyBarracksId === 1 ? 'enemy-barracks' : `enemy-barracks-${nextEnemyBarracksId}`,
-      x: factory.x + 220,
+      x: factory.x - 260,
       y: factory.y + 190,
       onStarted: () => {},
       onIdConsumed: () => options.setNextEnemyBarracksId(nextEnemyBarracksId + 1),
@@ -521,8 +522,20 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     let assignedAttackers = 0;
     for (const [index, attacker] of squad.entries()) {
       const targetPoint = options.getStaggeredRaidApproachPoint(target, index, squad.length);
-      const path = options.findEntityLandPath?.(attacker, { x: attacker.x, y: attacker.y }, targetPoint)
-        ?? options.findLandPath({ x: attacker.x, y: attacker.y }, targetPoint);
+      const candidateTargets = [targetPoint, raidPlan.targetPoint].filter(
+        (point, pointIndex, points) => points.findIndex((candidate) => candidate.x === point.x && candidate.y === point.y) === pointIndex,
+      );
+      const route = candidateTargets
+        .map((point) => ({
+          point,
+          path: options.findEntityLandPath?.(attacker, { x: attacker.x, y: attacker.y }, point)
+            ?? options.findLandPath({ x: attacker.x, y: attacker.y }, point),
+        }))
+        .find((candidate) => candidate.path.length > 0);
+      if (!route) {
+        continue;
+      }
+      const path = route.path;
       if (path.length === 0) {
         continue;
       }
@@ -534,8 +547,12 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
         attack: {
           targetId: target.id,
           phase: 'to-target',
-          damagePerSecond: attacker.kind === 'guard' ? 34 : 18,
-          range: attacker.kind === 'guard' ? 90 : 72,
+          damagePerSecond: attacker.kind === 'guard'
+            ? FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidGuardDamagePerSecond
+            : FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidWorkerDamagePerSecond,
+          range: attacker.kind === 'guard'
+            ? FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidGuardAttackRange
+            : FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidWorkerAttackRange,
         },
       };
       assignedAttackers += 1;

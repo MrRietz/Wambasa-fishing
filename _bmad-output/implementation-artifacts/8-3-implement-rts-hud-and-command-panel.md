@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 8-3-implement-rts-hud-and-command-panel
 epic: 8
 story: 3
@@ -63,3 +63,10 @@ The command panel now reads more like an RTS console: status/economy/selection r
 ## Change Log
 
 - 2026-05-16: Implemented Story 8.3 RTS HUD command panel grouping and readability polish.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Verified HUD and command-panel context visibility with focused factory/dock/Guard Tower e2e coverage plus typecheck/build.

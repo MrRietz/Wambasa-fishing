@@ -48,10 +48,10 @@ export const skirmish01MapData: CoastalMapData = {
   ],
   fishingZones: [
     { id: 'player-shore-sardines', label: 'Jetty Sardine Wash', x: 1080, y: 468, radius: 74, tier: 'safe', cashPerFish: 1, species: ['sardine', 'anchovy'], shoreAccess: true, maxFish: 90, regrowthPerSecond: 6, regrowthDelaySeconds: 11 },
-    { id: 'player-cod-bank', label: 'Harbor Cod Shelf', x: 1440, y: 306, radius: 104, tier: 'safe', cashPerFish: 2, species: ['cod', 'herring'], maxFish: 130, regrowthPerSecond: 8, regrowthDelaySeconds: 12 },
+    { id: 'cod-bank', label: 'Sunlit Cod Bank', x: 1585, y: 285, radius: 104, tier: 'safe', cashPerFish: 2, species: ['cod', 'herring'], maxFish: 120, regrowthPerSecond: 8, regrowthDelaySeconds: 12 },
     { id: 'harbor-silver-run', label: 'Harbor Silver Run', x: 1820, y: 456, radius: 82, tier: 'safe', cashPerFish: 2, species: ['herring', 'sardine'], shoreAccess: true, maxFish: 102, regrowthPerSecond: 7, regrowthDelaySeconds: 10 },
     { id: 'north-breaker-shoal', label: 'North Breaker Shoal', x: 2280, y: 342, radius: 80, tier: 'safe', cashPerFish: 2, species: ['herring', 'anchovy'], maxFish: 144, regrowthPerSecond: 9, regrowthDelaySeconds: 12 },
-    { id: 'herring-bank', label: 'Breaker Herring Run', x: 2720, y: 330, radius: 88, tier: 'contested', cashPerFish: 3, species: ['herring', 'mackerel'], maxFish: 188, regrowthPerSecond: 10, regrowthDelaySeconds: 13 },
+    { id: 'herring-bank', label: 'Breaker Herring Run', x: 2380, y: 345, radius: 88, tier: 'contested', cashPerFish: 3, species: ['herring', 'mackerel'], maxFish: 188, regrowthPerSecond: 10, regrowthDelaySeconds: 13 },
     { id: 'deepwater-trench', label: 'Deepwater Trench', x: 3220, y: 286, radius: 102, tier: 'safe', cashPerFish: 3, species: ['tuna', 'mackerel'], maxFish: 220, regrowthPerSecond: 12, regrowthDelaySeconds: 14 },
     { id: 'kelp-edge-shoal', label: 'Kelp Edge Shoal', x: 3660, y: 462, radius: 86, tier: 'safe', cashPerFish: 2, species: ['mackerel', 'salmon'], shoreAccess: true, maxFish: 112, regrowthPerSecond: 8, regrowthDelaySeconds: 11 },
     { id: 'stormfront-shoal', label: 'Stormfront Shoal', x: 4180, y: 330, radius: 92, tier: 'contested', cashPerFish: 4, species: ['salmon', 'mackerel'], maxFish: 230, regrowthPerSecond: 12, regrowthDelaySeconds: 15 },

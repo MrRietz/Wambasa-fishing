@@ -38,7 +38,7 @@ for (const [unit, actions] of Object.entries(manifest.requiredActions)) {
 
 const requiredVehicleFrames = {
   truck: { move: 4, harvest: 4 },
-  boat: { move: 4, fish: 5 },
+  boat: { move: 4, fish: 5, unload: 4, damaged: 2, destroyed: 2 },
 };
 for (const [unit, actions] of Object.entries(requiredVehicleFrames)) {
   for (const [action, frameCount] of Object.entries(actions)) {

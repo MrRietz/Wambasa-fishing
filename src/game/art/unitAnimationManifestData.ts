@@ -4,7 +4,7 @@ export const unitAnimationManifestData = {
   anchor: { x: 0.5, y: 0.82 },
   directions: ['east', 'south', 'west', 'north'],
   requiredActions: {
-    worker: ['idle', 'move', 'build', 'repair'],
+    worker: ['idle', 'move', 'build', 'repair', 'fish'],
     guard: ['idle', 'move', 'attack'],
     saboteur: ['idle', 'move', 'sabotage'],
   },
@@ -17,6 +17,7 @@ export const unitAnimationManifestData = {
         move: { frameCount: 6, fps: 10 },
         build: { frameCount: 4, fps: 7 },
         repair: { frameCount: 4, fps: 7 },
+        fish: { frameCount: 4, fps: 6 },
       },
     },
     guard: {

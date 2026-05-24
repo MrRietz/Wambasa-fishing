@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 8-6-add-ux-and-debug-overlay-polish
 epic: 8
 story: 6
@@ -70,3 +70,10 @@ The RTS side console now keeps recent player-facing messages readable in a stabl
 
 - 2026-05-16: Created Story 8.6 for UX/debug overlay polish.
 - 2026-05-16: Implemented alert feed, debug alert state, and regression coverage.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Verified alert feed, debug alert state, and viewport UI visibility against current build.

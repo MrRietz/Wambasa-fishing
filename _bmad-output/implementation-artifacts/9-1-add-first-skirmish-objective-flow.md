@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 9-1-add-first-skirmish-objective-flow
 epic: 9
 story: 1
@@ -67,3 +67,10 @@ First-skirmish objectives now guide selection, metal harvesting, Dock constructi
 
 - 2026-05-16: Created Story 9.1 for first-skirmish objectives.
 - 2026-05-16: Implemented state-derived first-skirmish objective flow and tests.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Verified and aligned first-skirmish objective order with no-starter-dock flow.

@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 9-3-add-match-restart-and-results-summary
 epic: 9
 story: 3
@@ -65,3 +65,10 @@ Match results now show the outcome reason, economy/combat summary stats, and a r
 
 - 2026-05-16: Created Story 9.3 for match result summary and restart.
 - 2026-05-16: Implemented result stats, restart button, debug state, and regression coverage.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Verified match result panels, summary state, defeat/victory display, and restart reload behavior.

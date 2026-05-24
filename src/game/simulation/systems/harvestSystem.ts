@@ -6,6 +6,7 @@ export type HarvestSystemEvent =
   | { kind: 'fieldDepleted'; entityId: string; faction: Faction; message: string }
   | { kind: 'metalLoaded'; entityId: string; faction: Faction; amount: number; message: string }
   | { kind: 'returnPathBlocked'; entityId: string; faction: Faction; message: string }
+  | { kind: 'fieldPathBlocked'; entityId: string; faction: Faction; message: string }
   | { kind: 'metalUnloaded'; entityId: string; faction: Faction; amount: number; stockpile: number; message: string };
 
 export interface MetalStockpile {
@@ -30,6 +31,7 @@ export interface HarvestSystemOutput {
 }
 
 const METAL_HARVEST_LOAD_SECONDS = 4.5;
+const HARVEST_RETRY_SECONDS = 1.5;
 
 export function resolveHarvestArrival(input: HarvestSystemInput): HarvestSystemOutput {
   const harvesting = input.truck.economy?.harvesting;
@@ -42,6 +44,83 @@ export function resolveHarvestArrival(input: HarvestSystemInput): HarvestSystemO
   if (!cargo || ((harvesting.phase === 'to-field' || harvesting.phase === 'loading') && !field)) {
     input.truck.economy = { ...input.truck.economy, harvesting: undefined };
     return { changed: true, events: [] };
+  }
+
+  if (harvesting.phase === 'return-blocked') {
+    const retrySeconds = Math.max(0, (harvesting.retrySeconds ?? 0) - (input.deltaSeconds ?? 0));
+    if (retrySeconds > 0) {
+      input.truck.economy = { ...input.truck.economy, cargo, harvesting: { ...harvesting, retrySeconds } };
+      return { changed: true, events: [] };
+    }
+
+    const dropOff = input.getDropOffPoint(input.truck);
+    const returnPath = input.findLandPath({ x: input.truck.x, y: input.truck.y }, dropOff);
+    if (returnPath.length === 0) {
+      input.truck.path = [];
+      input.truck.moveTarget = undefined;
+      input.truck.movement.state = 'idle';
+      input.truck.economy = {
+        ...input.truck.economy,
+        cargo,
+        harvesting: { ...harvesting, retrySeconds: HARVEST_RETRY_SECONDS, lastBlockedReason: 'factory-route' },
+      };
+      return {
+        changed: true,
+        events: [{ kind: 'returnPathBlocked', entityId: input.truck.id, faction: input.truck.faction, message: 'Truck is waiting for a route to the Factory drop-off.' }],
+      };
+    }
+
+    input.truck.path = returnPath;
+    input.truck.moveTarget = returnPath[0];
+    input.truck.movement.state = 'moving';
+    input.truck.economy = { ...input.truck.economy, cargo, harvesting: { fieldId: harvesting.fieldId, phase: 'returning' } };
+    return {
+      changed: true,
+      events: [],
+      moveCommand: { x: dropOff.x, y: dropOff.y, entityIds: [input.truck.id], pathLength: returnPath.length },
+    };
+  }
+
+  if (harvesting.phase === 'field-blocked') {
+    const retrySeconds = Math.max(0, (harvesting.retrySeconds ?? 0) - (input.deltaSeconds ?? 0));
+    if (retrySeconds > 0) {
+      input.truck.economy = { ...input.truck.economy, cargo, harvesting: { ...harvesting, retrySeconds } };
+      return { changed: true, events: [] };
+    }
+
+    if (!field || field.amount <= 0) {
+      input.truck.economy = { ...input.truck.economy, cargo, harvesting: undefined };
+      return {
+        changed: true,
+        events: [{ kind: 'fieldDepleted', entityId: input.truck.id, faction: input.truck.faction, message: 'Metal field is depleted.' }],
+      };
+    }
+
+    const assignment = planTruckReturnToField(input.truck, field, input.findLandPath);
+    if (!assignment) {
+      input.truck.path = [];
+      input.truck.moveTarget = undefined;
+      input.truck.movement.state = 'idle';
+      input.truck.economy = {
+        ...input.truck.economy,
+        cargo,
+        harvesting: { ...harvesting, retrySeconds: HARVEST_RETRY_SECONDS, lastBlockedReason: 'field-route' },
+      };
+      return {
+        changed: true,
+        events: [{ kind: 'fieldPathBlocked', entityId: input.truck.id, faction: input.truck.faction, message: 'Truck is waiting for a route back to the metal field.' }],
+      };
+    }
+
+    input.truck.path = assignment.path;
+    input.truck.moveTarget = assignment.path[0];
+    input.truck.movement.state = 'moving';
+    input.truck.economy = { ...input.truck.economy, cargo, harvesting: { fieldId: field.id, phase: 'to-field' } };
+    return {
+      changed: true,
+      events: [],
+      moveCommand: { x: assignment.target.x, y: assignment.target.y, entityIds: [input.truck.id], pathLength: assignment.path.length },
+    };
   }
 
   if (harvesting.phase === 'to-field') {
@@ -86,7 +165,14 @@ export function resolveHarvestArrival(input: HarvestSystemInput): HarvestSystemO
     const dropOff = input.getDropOffPoint(input.truck);
     const returnPath = input.findLandPath({ x: input.truck.x, y: input.truck.y }, dropOff);
     if (returnPath.length === 0) {
-      input.truck.economy = { ...input.truck.economy, cargo, harvesting: undefined };
+      input.truck.path = [];
+      input.truck.moveTarget = undefined;
+      input.truck.movement.state = 'idle';
+      input.truck.economy = {
+        ...input.truck.economy,
+        cargo,
+        harvesting: { fieldId: field.id, phase: 'return-blocked', retrySeconds: HARVEST_RETRY_SECONDS, lastBlockedReason: 'factory-route' },
+      };
       return {
         changed: true,
         events: [
@@ -153,6 +239,34 @@ export function resolveHarvestArrival(input: HarvestSystemInput): HarvestSystemO
         moveCommand: { x: assignment.target.x, y: assignment.target.y, entityIds: [input.truck.id], pathLength: assignment.path.length },
       };
     }
+
+    input.truck.path = [];
+    input.truck.moveTarget = undefined;
+    input.truck.movement.state = 'idle';
+    input.truck.economy = {
+      ...input.truck.economy,
+      cargo,
+      harvesting: { fieldId: nextField.id, phase: 'field-blocked', retrySeconds: HARVEST_RETRY_SECONDS, lastBlockedReason: 'field-route' },
+    };
+    return {
+      changed: true,
+      events: [
+        {
+          kind: 'metalUnloaded',
+          entityId: input.truck.id,
+          faction: input.truck.faction,
+          amount: unloaded,
+          stockpile: stockpile.metal,
+          message: `Metal hauler unloaded ${unloaded} metal. Stockpile: ${stockpile.metal}.`,
+        },
+        {
+          kind: 'fieldPathBlocked',
+          entityId: input.truck.id,
+          faction: input.truck.faction,
+          message: 'Truck unloaded metal, but no route back to the metal field was found.',
+        },
+      ],
+    };
   }
 
   input.truck.economy = { ...input.truck.economy, cargo, harvesting: undefined };
