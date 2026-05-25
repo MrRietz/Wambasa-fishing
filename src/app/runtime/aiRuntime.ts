@@ -405,7 +405,7 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
       }
 
       if (cargo.amount === 0 && !boat.economy?.fishing) {
-        const zone = pickAiFishingZone();
+        const zone = pickAiFishingZone(dock);
         if (!zone) {
           continue;
         }
@@ -428,21 +428,32 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     return false;
   }
 
-  function pickAiFishingZone(): FishingZoneState | undefined {
+  function pickAiFishingZone(origin?: { x: number; y: number }): FishingZoneState | undefined {
     const viableZones = options.fishingZoneStates.filter((zone) => zone.amount > 0 && zone.depletedCooldownSeconds <= 0);
     if (viableZones.length === 0) {
       return options.fishingZoneStates[0];
     }
 
+    const nearbyZones = origin
+      ? viableZones.filter((zone) => zone.x >= origin.x - 1400)
+      : viableZones;
+    const homeWaters = nearbyZones.length > 0 ? nearbyZones : viableZones;
+    const rankZones = (zones: FishingZoneState[]): FishingZoneState[] =>
+      [...zones].sort((a, b) => {
+        const distanceA = origin ? Math.hypot(a.x - origin.x, a.y - origin.y) : 0;
+        const distanceB = origin ? Math.hypot(b.x - origin.x, b.y - origin.y) : 0;
+        const scoreA = a.cashPerFish * 120 + Math.min(a.amount, 180) - distanceA / 8;
+        const scoreB = b.cashPerFish * 120 + Math.min(b.amount, 180) - distanceB / 8;
+        return scoreB - scoreA;
+      });
+
     if (options.aiController.strategy === 'economicBoom') {
-      return [...viableZones].sort((a, b) => (b.cashPerFish * b.amount) - (a.cashPerFish * a.amount))[0];
+      return rankZones(homeWaters)[0];
     }
     if (options.aiController.strategy === 'harborPressure') {
-      return viableZones.find((zone) => zone.tier === 'contested') ?? [...viableZones].sort((a, b) => b.cashPerFish - a.cashPerFish)[0];
+      return rankZones(homeWaters.filter((zone) => zone.tier === 'contested'))[0] ?? rankZones(homeWaters)[0];
     }
-    return viableZones.find((zone) => zone.id === 'herring-bank')
-      ?? viableZones.find((zone) => zone.tier === 'safe')
-      ?? viableZones[0];
+    return rankZones(homeWaters.filter((zone) => zone.tier === 'safe'))[0] ?? rankZones(homeWaters)[0];
   }
 
   function isUsableAiProducer(entity: GameEntity, kind: GameEntity['kind']): boolean {

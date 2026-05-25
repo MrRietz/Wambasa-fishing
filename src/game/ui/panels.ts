@@ -309,9 +309,9 @@ export function renderWorkerCommandPanel(
   elements.equipReelButtonElement.disabled = !workerSelected || availableReels <= 0;
   const houseCostLabel = `${buildingCatalog.house.cost} metal`;
   const houseReason = metal < buildingCatalog.house.cost ? `Need ${buildingCatalog.house.cost - metal} metal` : houseCostLabel;
-  elements.placeHouseButtonElement.setAttribute('aria-label', `Build House - ${houseReason}`);
-  elements.placeHouseButtonElement.title = `Build House - ${houseReason} | +${buildingCatalog.house.capacityBonus} crew cap`;
-  elements.placeHouseButtonElement.innerHTML = `Build House<br><span>${houseReason}</span>`;
+  elements.placeHouseButtonElement.setAttribute('aria-label', `House - ${houseReason}`);
+  elements.placeHouseButtonElement.title = `House - ${houseReason} | +${buildingCatalog.house.capacityBonus} crew cap`;
+  elements.placeHouseButtonElement.innerHTML = `House<br><span>${houseReason}</span>`;
   elements.assignFactoryCrewButtonElement.innerHTML = `Crew<br><span>${factoryCrewTarget ? 'factory ready' : 'right-click factory'}</span>`;
   elements.equipReelButtonElement.innerHTML = `Reel<br><span>${availableReels} available</span>`;
   elements.workerBuildDetailsElement.textContent = workerSelected ? getWorkerBuildDetailsCopy(selectedWorkerCount, availableReels) : '';

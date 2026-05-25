@@ -1727,7 +1727,7 @@ const tests: TestCase[] = [
     },
   },
   {
-    name: 'AI siege opening builds barracks before dock economy',
+    name: 'AI siege opening secures dock economy before barracks',
     run: () => {
       const state = makeAiControllerState({
         strategy: 'siege',
@@ -1768,8 +1768,8 @@ const tests: TestCase[] = [
       });
 
       assert.equal(changed, true);
-      assert.equal(builtBarracks, true);
-      assert.equal(builtDock, false);
+      assert.equal(builtDock, true);
+      assert.equal(builtBarracks, false);
     },
   },
   {

@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 story_key: 9-5-mvp-regression-test-suite
 epic: 9
 story: 5
@@ -45,10 +45,14 @@ So that future polish does not break core RTS play.
 - Added `npm run test:mvp` for the integrated MVP Playwright regression suite.
 - Added `_bmad-output/implementation-artifacts/mvp-regression-coverage.md`.
 - Verified `npm run typecheck` and `npm run test:mvp`.
+- Revalidated the MVP regression suite in focused Chromium chunks after gameplay balance, AI, and UI flow changes exposed stale assumptions in the integrated tests.
+- Attempted the one-shot Chromium MVP command with a 20-minute timeout; the runner timed out without reporter output, so verification is recorded from the passing focused chunks plus command tests, typecheck, and build.
 
 ### Completion Notes
 
 The MVP regression suite is now formalized with a dedicated command and coverage manifest. The command currently runs 50 integrated e2e tests covering the MVP systems listed in the acceptance criteria.
+
+2026-05-24 review pass: updated the integrated MVP regression coverage for the current no-starter-dock opening, stabilized AI economy/pressure regression checks, and added debug-only test hooks for deterministic selection, movement, attack, and sabotage validation. Focused Chromium chunks cover Epic 1 through Epic 11 scenarios, while command tests, typecheck, and production build pass.
 
 ## File List
 
@@ -56,8 +60,22 @@ The MVP regression suite is now formalized with a dedicated command and coverage
 - _bmad-output/implementation-artifacts/mvp-regression-coverage.md
 - _bmad-output/implementation-artifacts/9-5-mvp-regression-test-suite.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
+- src/app/createApp.ts
+- src/app/runtime/aiRuntime.ts
+- src/game/ai/aiCoordinator.ts
+- src/game/simulation/resourceRouting.ts
+- tests/commands/command-validation.spec.ts
+- tests/e2e/epic1-rts-foundation.spec.ts
 
 ## Change Log
 
 - 2026-05-16: Created Story 9.5 for MVP regression suite formalization.
 - 2026-05-16: Added MVP regression command, coverage manifest, and verified the suite.
+- 2026-05-24: Revalidated and repaired MVP regression coverage after no-starter-dock, fishing balance, AI economy, and combat flow changes.
+
+
+## Dev Agent Record
+
+### Completion Notes List
+
+- 2026-05-24: Marked done. Chromium MVP regression coverage passed in focused chunks; command tests, typecheck, and build passed; one-shot Chromium MVP runner timed out without reporter output.

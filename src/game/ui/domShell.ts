@@ -4,6 +4,12 @@ export interface RtsDomElements {
   statusElement: HTMLParagraphElement;
   skirmishButton: HTMLButtonElement;
   pauseToggleButtonElement: HTMLButtonElement;
+  mobileCommandTrayElement: HTMLDivElement;
+  mobileSelectButtonElement: HTMLButtonElement;
+  mobileSmartButtonElement: HTMLButtonElement;
+  mobileMoveButtonElement: HTMLButtonElement;
+  mobileAttackButtonElement: HTMLButtonElement;
+  mobileMenuButtonElement: HTMLButtonElement;
   minimapElement: HTMLCanvasElement;
   minimapContext: CanvasRenderingContext2D;
   commandHintElement: HTMLDivElement;
@@ -106,6 +112,13 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
           <div id="viewport-selection-readout" class="rts-viewport-selection">No unit selected</div>
           <div id="viewport-hotkey-readout" class="rts-viewport-hotkeys">LMB Select | RMB Order | A Attack-Move | T Attack | H Hold | S Stop</div>
         </div>
+        <div id="mobile-command-tray" class="rts-mobile-command-tray" aria-label="Mobile command modes" hidden>
+          <button id="mobile-select-command-button" type="button" aria-pressed="true">Select</button>
+          <button id="mobile-smart-command-button" type="button" aria-pressed="false">Order</button>
+          <button id="mobile-move-command-button" type="button" aria-pressed="false">Move</button>
+          <button id="mobile-attack-command-button" type="button" aria-pressed="false">Attack</button>
+          <button id="mobile-menu-command-button" type="button" aria-pressed="false">Menu</button>
+        </div>
       </main>
       <section id="pause-menu-panel" class="rts-pause-panel" aria-live="polite" hidden>
         <div class="rts-panel-title">Skirmish Menu</div>
@@ -198,12 +211,12 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
             </div>
             <div id="worker-command-panel" class="rts-worker-commands" hidden>
               <div class="rts-command-group-title">Worker Build Menu</div>
-              <button id="place-house-button" data-command-icon="HS" data-command-tone="build" type="button" aria-label="Build House - 90 metal" title="Build House - 90 metal | +8 crew cap">Build House<br><span>90 metal</span></button>
-              <button id="place-dock-button" data-command-icon="DK" data-command-tone="build" type="button" aria-label="Plan Dock - 120 metal">Plan Dock<br><span>120 metal</span></button>
-              <button id="place-guard-tower-button" data-command-icon="GT" data-command-tone="combat" type="button" aria-label="Plan Guard Tower - 150 metal">Plan Guard Tower<br><span>150 metal</span></button>
-              <button id="place-tech-lab-button" data-command-icon="TL" data-command-tone="utility" type="button" aria-label="Plan Tech Lab - 190 metal">Plan Tech Lab<br><span>190 metal</span></button>
-              <button id="place-barracks-button" data-command-icon="BR" data-command-tone="combat" type="button" aria-label="Plan Barracks - 180 metal">Plan Barracks<br><span>180 metal</span></button>
-              <button id="place-factory-button" data-command-icon="CC" data-command-tone="econ" type="button" aria-label="Plan Command Center - 420 metal">Plan Command Center<br><span>420 metal</span></button>
+              <button id="place-house-button" data-command-icon="HS" data-command-tone="build" type="button" aria-label="House - 90 metal" title="House - 90 metal | +8 crew cap">House<br><span>90 metal</span></button>
+              <button id="place-dock-button" data-command-icon="DK" data-command-tone="build" type="button" aria-label="Dock - 120 metal">Dock<br><span>120 metal</span></button>
+              <button id="place-guard-tower-button" data-command-icon="GT" data-command-tone="combat" type="button" aria-label="Guard Tower - 150 metal">Guard Tower<br><span>150 metal</span></button>
+              <button id="place-tech-lab-button" data-command-icon="TL" data-command-tone="utility" type="button" aria-label="Tech Lab - 190 metal">Tech Lab<br><span>190 metal</span></button>
+              <button id="place-barracks-button" data-command-icon="BR" data-command-tone="combat" type="button" aria-label="Barracks - 180 metal">Barracks<br><span>180 metal</span></button>
+              <button id="place-factory-button" data-command-icon="CC" data-command-tone="econ" type="button" aria-label="Command Center - 420 metal">Command Center<br><span>420 metal</span></button>
               <button id="assign-factory-crew-button" data-command-icon="CR" data-command-tone="utility" type="button" aria-label="Assign selected workers to factory crew">Crew Factory<br><span>Right-click factory</span></button>
               <button id="equip-reel-button" data-command-icon="RE" data-command-tone="cash" type="button" aria-label="Equip reel on selected workers">Equip Reel<br><span>Boost shoreline fishing</span></button>
               <div id="worker-build-details" class="rts-build-details" aria-label="Worker building details"></div>
@@ -240,6 +253,12 @@ export function mountRtsDomShell(rootSelector = '#app'): RtsDomElements {
     statusElement: requiredElement<HTMLParagraphElement>('#boot-status'),
     skirmishButton: requiredElement<HTMLButtonElement>('#start-button'),
     pauseToggleButtonElement: requiredElement<HTMLButtonElement>('#pause-toggle-button'),
+    mobileCommandTrayElement: requiredElement<HTMLDivElement>('#mobile-command-tray'),
+    mobileSelectButtonElement: requiredElement<HTMLButtonElement>('#mobile-select-command-button'),
+    mobileSmartButtonElement: requiredElement<HTMLButtonElement>('#mobile-smart-command-button'),
+    mobileMoveButtonElement: requiredElement<HTMLButtonElement>('#mobile-move-command-button'),
+    mobileAttackButtonElement: requiredElement<HTMLButtonElement>('#mobile-attack-command-button'),
+    mobileMenuButtonElement: requiredElement<HTMLButtonElement>('#mobile-menu-command-button'),
     minimapElement: requiredElement<HTMLCanvasElement>('#rts-minimap'),
     commandHintElement: requiredElement<HTMLDivElement>('#command-hint'),
     alertFeedElement: requiredElement<HTMLDivElement>('#alert-feed'),

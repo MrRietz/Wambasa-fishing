@@ -213,6 +213,40 @@ button {
   height: 100%;
 }
 
+.rts-mobile-command-tray {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 4;
+  display: none;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+  pointer-events: auto;
+}
+
+.rts-mobile-command-tray button {
+  min-width: 0;
+  min-height: 48px;
+  padding: 7px 4px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 217, 130, 0.4);
+  border-radius: 10px;
+  color: #fff1c7;
+  background: linear-gradient(180deg, rgba(39, 67, 62, 0.94), rgba(13, 28, 31, 0.96));
+  font-size: 0.78rem;
+  font-weight: 950;
+  line-height: 1;
+  text-align: center;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
+.rts-mobile-command-tray button[aria-pressed="true"] {
+  color: #1b211c;
+  border-color: rgba(255, 242, 194, 0.78);
+  background: linear-gradient(180deg, #ffd982, #d69d34);
+}
+
 .rts-side-panel {
   position: absolute;
   top: 12px;
@@ -1369,6 +1403,33 @@ button {
 }
 
 @media (max-width: 900px) {
+  .rts-shell[data-mobile-mode="true"] .rts-game {
+    border-width: 0;
+    touch-action: none;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-mobile-command-tray {
+    display: grid;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-viewport-hud {
+    top: 8px;
+    left: 8px;
+    width: min(430px, calc(100% - 16px));
+    gap: 5px;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-viewport-hotkeys {
+    display: none;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-viewport-mode,
+  .rts-shell[data-mobile-mode="true"] .rts-viewport-selection {
+    padding: 7px 9px;
+    border-radius: 9px;
+    font-size: 0.72rem;
+  }
+
   .rts-side-panel {
     left: 10px;
     right: 10px;
@@ -1413,6 +1474,87 @@ button {
   }
 
   .rts-command-panel {
+    display: none;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-side-panel {
+    top: auto;
+    bottom: 66px;
+    left: 8px;
+    right: 8px;
+    height: clamp(214px, 34dvh, 310px);
+    max-height: clamp(214px, 34dvh, 310px);
+    gap: 7px;
+    width: auto;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-minimap-panel {
+    grid-row: 1;
+    display: grid;
+    grid-template-columns: minmax(96px, 0.7fr) minmax(0, 1.3fr);
+    grid-template-areas:
+      "title economy"
+      "map economy";
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-minimap {
+    min-height: 70px;
+    max-height: 92px;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-economy-readout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    min-height: 0;
+    padding: 7px;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-command-panel {
+    display: grid;
+    grid-row: 2;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-command-header {
+    display: none;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-selection-readout {
+    grid-row: 1;
+    max-height: 86px;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-command-grid {
+    grid-row: 2;
+    grid-template-columns: 1fr;
+    gap: 7px;
+    overflow: auto;
+    padding: 0 2px 0 0;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-factory-commands,
+  .rts-shell[data-mobile-mode="true"] .rts-dock-commands,
+  .rts-shell[data-mobile-mode="true"] .rts-worker-commands,
+  .rts-shell[data-mobile-mode="true"] .rts-tactical-commands {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    padding: 8px;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-factory-commands button,
+  .rts-shell[data-mobile-mode="true"] .rts-dock-commands button,
+  .rts-shell[data-mobile-mode="true"] .rts-worker-commands button,
+  .rts-shell[data-mobile-mode="true"] .rts-tactical-commands button {
+    min-height: 50px;
+    padding: 8px 7px 8px 48px;
+  }
+
+  .rts-shell[data-mobile-mode="true"] .rts-intel-panel {
     display: none;
   }
 }

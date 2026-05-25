@@ -39,6 +39,9 @@ export function planTruckHarvestAssignments(
       if (path.length > 0) {
         return { entity, path, target: truckTarget };
       }
+      if (Math.hypot(entity.x - truckTarget.x, entity.y - truckTarget.y) <= 48) {
+        return { entity, path: [truckTarget], target: truckTarget };
+      }
     }
     return { entity, path: [] as PathPoint[], target: candidateTargets[0] };
   });

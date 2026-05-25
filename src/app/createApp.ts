@@ -77,6 +77,7 @@ import { createPlacementRuntime } from './runtime/placementRuntime';
 import { createRenderRuntime } from './runtime/renderRuntime';
 
 type BootStatus = 'loading' | 'ready' | 'failed';
+type MobileCommandMode = 'select' | 'smart' | 'move';
 
 const MOVEMENT_RENDER_INTERVAL_SECONDS = 1 / 24;
 const TRUCK_CRUSH_MINIMUM_SPEED = 42;
@@ -87,8 +88,12 @@ declare global {
     __wambasaRtsDamageEntity?: (entityId: string, amount: number) => boolean;
     __wambasaRtsForceRaid?: () => boolean;
     __wambasaRtsForceRaidTarget?: (targetId?: string) => boolean;
+    __wambasaRtsAttackEntity?: (attackerId: string, targetId: string) => boolean;
+    __wambasaRtsSabotageEntity?: (saboteurId: string, targetId: string) => boolean;
+    __wambasaRtsMoveEntity?: (entityId: string, x: number, y: number) => boolean;
     __wambasaRtsSetFishingZoneAmount?: (zoneId: string, amount: number) => boolean;
     __wambasaRtsSelectEntity?: (entityId: string) => boolean;
+    __wambasaRtsSelectEntities?: (entityIds: string[]) => boolean;
     webkitAudioContext?: typeof AudioContext;
   }
 }
@@ -156,7 +161,7 @@ const aiDefenseState: AiDefenseState = {
   defensiveStructureBuilt: false,
 };
 
-const { rootElement, gameElement, statusElement, skirmishButton, pauseToggleButtonElement, minimapElement, minimapContext, commandHintElement, alertFeedElement, selectionElement, viewportHudElement, viewportModeElement, viewportSelectionElement, viewportHotkeyElement, economyElement, musicSliderElement, sfxSliderElement, musicReadoutElement, sfxReadoutElement, uiScaleSliderElement, uiScaleReadoutElement, scrollSpeedSliderElement, scrollSpeedReadoutElement, edgeScrollToggleElement, difficultySelectElement, saveGameButtonElement, loadGameButtonElement, exportSaveButtonElement, importSaveButtonElement, importSaveInputElement, factoryCommandsElement, workerButtonElement, truckButtonElement, sellReelsButtonElement, toggleAutoSellButtonElement, releaseFactoryCrewDecreaseButtonElement, releaseFactoryCrewCountElement, releaseFactoryCrewButtonElement, releaseFactoryCrewIncreaseButtonElement, productionElement, factoryReelReadoutElement, barracksCommandsElement, guardButtonElement, saboteurButtonElement, barracksProductionElement, dockCommandsElement, boatButtonElement, attackBoatButtonElement, dockProductionElement, techLabCommandsElement, cncUpgradeButtonElement, militaryUpgradeButtonElement, boatsUpgradeButtonElement, reelsUpgradeButtonElement, techLabReadoutElement, workerCommandsElement, placeHouseButtonElement, placeDockButtonElement, placeGuardTowerButtonElement, placeTechLabButtonElement, placeBarracksButtonElement, placeFactoryButtonElement, assignFactoryCrewButtonElement, equipReelButtonElement, workerBuildDetailsElement, placementElement, tacticalCommandsElement, buildingCommandsElement, sellBuildingButtonElement, stopButtonElement, attackButtonElement, holdButtonElement, attackMoveButtonElement, resultPanelElement, resultTitleElement, resultReasonElement, resultAdviceElement, resultSummaryElement, restartButtonElement, pausePanelElement, resumeButtonElement, pauseRestartButtonElement, objectiveListElement } = mountRtsDomShell();
+const { rootElement, gameElement, statusElement, skirmishButton, pauseToggleButtonElement, mobileCommandTrayElement, mobileSelectButtonElement, mobileSmartButtonElement, mobileMoveButtonElement, mobileAttackButtonElement, mobileMenuButtonElement, minimapElement, minimapContext, commandHintElement, alertFeedElement, selectionElement, viewportHudElement, viewportModeElement, viewportSelectionElement, viewportHotkeyElement, economyElement, musicSliderElement, sfxSliderElement, musicReadoutElement, sfxReadoutElement, uiScaleSliderElement, uiScaleReadoutElement, scrollSpeedSliderElement, scrollSpeedReadoutElement, edgeScrollToggleElement, difficultySelectElement, saveGameButtonElement, loadGameButtonElement, exportSaveButtonElement, importSaveButtonElement, importSaveInputElement, factoryCommandsElement, workerButtonElement, truckButtonElement, sellReelsButtonElement, toggleAutoSellButtonElement, releaseFactoryCrewDecreaseButtonElement, releaseFactoryCrewCountElement, releaseFactoryCrewButtonElement, releaseFactoryCrewIncreaseButtonElement, productionElement, factoryReelReadoutElement, barracksCommandsElement, guardButtonElement, saboteurButtonElement, barracksProductionElement, dockCommandsElement, boatButtonElement, attackBoatButtonElement, dockProductionElement, techLabCommandsElement, cncUpgradeButtonElement, militaryUpgradeButtonElement, boatsUpgradeButtonElement, reelsUpgradeButtonElement, techLabReadoutElement, workerCommandsElement, placeHouseButtonElement, placeDockButtonElement, placeGuardTowerButtonElement, placeTechLabButtonElement, placeBarracksButtonElement, placeFactoryButtonElement, assignFactoryCrewButtonElement, equipReelButtonElement, workerBuildDetailsElement, placementElement, tacticalCommandsElement, buildingCommandsElement, sellBuildingButtonElement, stopButtonElement, attackButtonElement, holdButtonElement, attackMoveButtonElement, resultPanelElement, resultTitleElement, resultReasonElement, resultAdviceElement, resultSummaryElement, restartButtonElement, pausePanelElement, resumeButtonElement, pauseRestartButtonElement, objectiveListElement } = mountRtsDomShell();
 const root = rootElement;
 const hudPresenter = createHudPresenter(root, {
   commandHintElement,
@@ -235,6 +240,23 @@ let pointerInViewport = false;
 let edgeScrollX = 0;
 let edgeScrollY = 0;
 let dragPan: { pointerId: number; lastX: number; lastY: number } | null = null;
+let mobileCommandMode: MobileCommandMode = 'select';
+const activeTouchPointers = new Map<number, { x: number; y: number }>();
+let mobilePinchGesture:
+  | {
+      centerX: number;
+      centerY: number;
+      distance: number;
+    }
+  | null = null;
+let mobileLongPress:
+  | {
+      pointerId: number;
+      startX: number;
+      startY: number;
+      timeoutId: number;
+    }
+  | null = null;
 let minimapDragActive = false;
 let minimapViewportDragOffset: { x: number; y: number } | null = null;
 let debugState: RtsDebugState | null = null;
@@ -316,6 +338,45 @@ function setBootStatusWithFocus(status: BootStatus, message: string, focusWorld:
   root.dataset.bootStatus = status;
   statusElement.textContent = message;
   pushAlert(statusToAlertSeverity(status, message), message, focusWorld);
+}
+
+function isMobilePrototypeActive(): boolean {
+  return root.dataset.mobileMode === 'true';
+}
+
+function shouldEnableMobilePrototype(): boolean {
+  const forced = new URLSearchParams(window.location.search).get('mobile') === '1';
+  return forced || window.innerWidth <= 900;
+}
+
+function syncMobilePrototypeMode(): void {
+  const enabled = shouldEnableMobilePrototype();
+  root.dataset.mobileMode = enabled ? 'true' : 'false';
+  root.dataset.mobileCommandMode = enabled ? mobileCommandMode : 'desktop';
+  mobileCommandTrayElement.hidden = !enabled;
+  syncMobileCommandButtons();
+}
+
+function setMobileCommandMode(mode: MobileCommandMode, message?: string): void {
+  mobileCommandMode = mode;
+  root.dataset.mobileCommandMode = mode;
+  syncMobileCommandButtons();
+  if (message) {
+    setBootStatus('ready', message);
+  }
+}
+
+function syncMobileCommandButtons(): void {
+  const buttons: Array<[HTMLButtonElement, MobileCommandMode]> = [
+    [mobileSelectButtonElement, 'select'],
+    [mobileSmartButtonElement, 'smart'],
+    [mobileMoveButtonElement, 'move'],
+  ];
+  for (const [button, mode] of buttons) {
+    button.setAttribute('aria-pressed', mobileCommandMode === mode ? 'true' : 'false');
+  }
+  mobileAttackButtonElement.setAttribute('aria-pressed', attackTargetPlacement ? 'true' : 'false');
+  mobileMenuButtonElement.setAttribute('aria-pressed', pauseMenuOpen ? 'true' : 'false');
 }
 
 function statusToAlertSeverity(status: BootStatus, message: string): AlertSeverity {
@@ -513,10 +574,12 @@ function playCombatHitSfx(): void {
 function updateMatchResultPanel(): void {
   hudPresenter.renderMatchResult(matchState, matchStats);
   hudPresenter.syncPause({ outcome: matchState.outcome, pauseMenuOpen, skirmishStarted });
+  syncMobileCommandButtons();
 }
 
 function syncPauseUi(): void {
   hudPresenter.syncPause({ outcome: matchState.outcome, pauseMenuOpen, skirmishStarted });
+  syncMobileCommandButtons();
 }
 
 function setPauseMenuOpen(open: boolean, layers: RenderLayers): void {
@@ -1783,6 +1846,8 @@ function beginAttackTarget(layers: RenderLayers): void {
   attackTargetPlacement = true;
   combatPreviewTargetId = undefined;
   combatPreviewTargetValid = false;
+  mobileCommandMode = 'select';
+  syncMobileCommandButtons();
   updateCommandHint();
   drawCombatTargetingOverlay(layers);
   setBootStatus('ready', 'Attack armed: left-click an enemy target.');
@@ -1797,6 +1862,8 @@ function beginAttackMove(layers: RenderLayers): void {
   }
   attackTargetPlacement = false;
   attackMovePlacement = true;
+  mobileCommandMode = 'select';
+  syncMobileCommandButtons();
   clearCombatPreview();
   updateCommandHint();
   drawCombatTargetingOverlay(layers);
@@ -1806,6 +1873,7 @@ function beginAttackMove(layers: RenderLayers): void {
 
 function issueAttackMoveCommand(worldX: number, worldY: number, layers: RenderLayers): void {
   attackMovePlacement = false;
+  syncMobileCommandButtons();
   finishCommandWithMoveOverlay(
     executeAttackMoveCommand({ worldX, worldY, selectedUnits: getSelectedPlayerCommandableUnits(), findLandPath, findEntityLandPath, findWaterPath, isValidLandDestination, isValidWaterDestination }),
     layers,
@@ -1820,6 +1888,7 @@ function cancelTargetingModes(layers: RenderLayers, message: string): void {
   }
   attackMovePlacement = false;
   attackTargetPlacement = false;
+  syncMobileCommandButtons();
   clearCombatPreview();
   updateCommandHint();
   drawCombatTargetingOverlay(layers);
@@ -1839,6 +1908,7 @@ function issueAttackCommand(target: GameEntity, layers: RenderLayers): boolean {
   const handled = finishCommandWithMoveOverlay(output, layers);
   if (handled) {
     attackTargetPlacement = false;
+    syncMobileCommandButtons();
     clearCombatPreview();
     updateCommandHint();
   }
@@ -2485,6 +2555,10 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
+function isInteractiveUiTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest('button, input, select, textarea, [role="button"]'));
+}
+
 function updateProduction(app: Application, deltaSeconds: number, layers: RenderLayers): boolean {
   const result = updateProductionQueues({
     producers: entities.filter((entity) => entity.faction === 'player' && entity.economy?.productionQueue),
@@ -3102,6 +3176,60 @@ function installDebugTestHooks(layers?: RenderLayers): void {
   };
   window.__wambasaRtsForceRaid = (): boolean => forceRaidTarget();
   window.__wambasaRtsForceRaidTarget = (targetId?: string): boolean => forceRaidTarget(targetId);
+  window.__wambasaRtsAttackEntity = (attackerId: string, targetId: string): boolean => {
+    if (!debugHookLayers) return false;
+    const attacker = entities.find((candidate) => candidate.id === attackerId);
+    const target = entities.find((candidate) => candidate.id === targetId);
+    if (!attacker || !target) return false;
+    selectEntity(attacker, debugHookLayers, false);
+    return issueAttackCommand(target, debugHookLayers);
+  };
+  window.__wambasaRtsSabotageEntity = (saboteurId: string, targetId: string): boolean => {
+    if (!debugHookLayers) return false;
+    const saboteur = entities.find((candidate) => candidate.id === saboteurId);
+    const target = entities.find((candidate) => candidate.id === targetId);
+    if (!saboteur || !target) return false;
+    selectEntity(saboteur, debugHookLayers, false);
+    const handled = issueSabotageCommand(target, debugHookLayers);
+    if (handled && lastCommandResult?.ok) {
+      target.economy = { ...target.economy, disabledSeconds: 8 };
+      saboteur.economy = { ...saboteur.economy, sabotage: undefined };
+      lastSabotageEvent = { kind: 'disabled', saboteurId, targetId, disabledSeconds: 8 };
+      renderBuildings(debugHookLayers);
+      renderUnits(debugHookLayers);
+      publishDebugState(debugHookLayers);
+    }
+    return handled;
+  };
+  window.__wambasaRtsMoveEntity = (entityId: string, x: number, y: number): boolean => {
+    if (!debugHookLayers || !Number.isFinite(x) || !Number.isFinite(y)) {
+      return false;
+    }
+    const entity = entities.find((candidate) => candidate.id === entityId);
+    if (!entity) {
+      return false;
+    }
+    entity.x = x;
+    entity.y = y;
+    entity.path = [];
+    entity.moveTarget = undefined;
+    entity.movement.state = 'idle';
+    entity.economy = {
+      ...entity.economy,
+      harvesting: undefined,
+      shoreFishing: undefined,
+      unloadingFish: undefined,
+      attack: undefined,
+      sabotage: undefined,
+      repair: undefined,
+    };
+    renderBuildings(debugHookLayers);
+    renderUnits(debugHookLayers);
+    drawSelectionOverlay(debugHookLayers);
+    updateSelectionReadout();
+    publishDebugState(debugHookLayers);
+    return true;
+  };
   window.__wambasaRtsSelectEntity = (entityId: string): boolean => {
     if (!debugHookLayers) {
       return false;
@@ -3109,6 +3237,19 @@ function installDebugTestHooks(layers?: RenderLayers): void {
     const entity = entities.find((candidate) => candidate.id === entityId) ?? null;
     selectEntity(entity, debugHookLayers, false);
     return Boolean(entity);
+  };
+  window.__wambasaRtsSelectEntities = (entityIds: string[]): boolean => {
+    if (!debugHookLayers) return false;
+    const found = entityIds
+      .map((id) => entities.find((candidate) => candidate.id === id))
+      .filter((entity): entity is GameEntity => Boolean(entity));
+    if (found.length !== entityIds.length) return false;
+    selectedEntityIds.clear();
+    for (const entity of found) selectedEntityIds.add(entity.id);
+    updateSelectionReadout();
+    drawSelectionOverlay(debugHookLayers);
+    publishDebugState(debugHookLayers);
+    return true;
   };
   window.__wambasaRtsSetFishingZoneAmount = (zoneId: string, amount: number): boolean => {
     const zone = fishingZoneStates.find((candidate) => candidate.id === zoneId);
@@ -3415,10 +3556,11 @@ function getAiRaidSquad(leadAttacker: GameEntity, target: GameEntity): GameEntit
     const scoreB = b.id === leadAttacker.id ? -2 : b.kind === 'guard' ? 0 : 2;
     return scoreA - scoreB || Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y);
   });
-  if (prioritized.length < desiredSize) {
+  const minimumReadySize = aiController.raidCount === 0 ? 1 : desiredSize;
+  if (prioritized.length < minimumReadySize) {
     return [];
   }
-  return prioritized.slice(0, desiredSize);
+  return prioritized.slice(0, Math.min(desiredSize, prioritized.length));
 }
 
 function getDesiredAiRaidSquadSize(): number {
@@ -4715,6 +4857,188 @@ function getAnimationTargetPosition(entity: GameEntity): { x: number; y: number 
   return target ? { x: target.x, y: target.y } : undefined;
 }
 
+function issueSmartCommandAt(worldX: number, worldY: number, layers: RenderLayers): boolean {
+  const targetEntity = pickEntityAt(worldX, worldY);
+  const selectedRallyBuilding = getSelectedRallyBuilding();
+  const selectedUnits = getSelectedPlayerCommandableUnits();
+  if (selectedRallyBuilding && selectedUnits.length === 0 && issueSetBuildingRallyPoint(selectedRallyBuilding, worldX, worldY, layers)) {
+    return true;
+  }
+  const hasSelectedWorker = selectedUnits.some((entity) => entity.kind === 'worker');
+  const hasSelectedLoadedMetalTruck = selectedUnits.some((entity) => entity.kind === 'truck' && entity.economy?.cargo?.kind === 'metal' && (entity.economy.cargo.amount ?? 0) > 0);
+  const hasSelectedLoadedFishWorker = selectedUnits.some((entity) => entity.kind === 'worker' && entity.economy?.cargo?.kind === 'fish' && (entity.economy.cargo.amount ?? 0) > 0);
+  const hasSelectedGuard = selectedUnits.some((entity) => entity.kind === 'guard');
+  const hasSelectedAttackBoat = selectedUnits.some((entity) => entity.kind === 'boat' && entity.economy?.combatRole === 'attack');
+  const hasSelectedSaboteur = selectedUnits.some((entity) => entity.kind === 'saboteur');
+  if (targetEntity && issueResumeConstructionCommand(targetEntity, layers)) {
+    return true;
+  }
+  if (targetEntity?.faction === 'player' && issueRepairCommand(targetEntity, layers)) {
+    return true;
+  }
+  if (hasSelectedLoadedMetalTruck && targetEntity?.kind === 'factory' && targetEntity.faction === 'player' && issueMetalUnloadCommand(targetEntity, layers)) {
+    return true;
+  }
+  if (
+    hasSelectedLoadedFishWorker &&
+    (targetEntity?.kind === 'factory' || targetEntity?.kind === 'dock') &&
+    targetEntity.faction === 'player' &&
+    issueWorkerFishUnloadCommand(targetEntity, layers)
+  ) {
+    return true;
+  }
+  if (targetEntity?.kind === 'factory' && targetEntity.faction === 'player' && hasSelectedWorker) {
+    issueAssignFactoryCrewCommand(layers, targetEntity);
+    return true;
+  }
+  if (targetEntity?.faction === 'enemy' && (hasSelectedWorker || hasSelectedGuard || hasSelectedAttackBoat) && issueAttackCommand(targetEntity, layers)) {
+    renderUnits(layers);
+    updateSelectionReadout();
+    return true;
+  }
+  if (targetEntity?.faction === 'enemy' && hasSelectedSaboteur && issueSabotageCommand(targetEntity, layers)) {
+    return true;
+  }
+  if (targetEntity?.faction === 'enemy' && hasSelectedSaboteur && !hasSelectedGuard && !hasSelectedWorker) {
+    setBootStatus(
+      'ready',
+      targetEntity.renderable.layer === 'buildings'
+        ? 'Selected saboteurs could not reach that enemy building.'
+        : 'Saboteurs can only target enemy buildings. Select workers or guards to attack enemy land units.',
+    );
+    playSfx('error');
+    publishDebugState(layers);
+    return true;
+  }
+  if (targetEntity?.faction === 'enemy' && hasSelectedAttackBoat && !hasSelectedGuard) {
+    setBootStatus(
+      'ready',
+      targetEntity.kind === 'boat'
+        ? 'Selected attack boats could not reach that enemy boat.'
+        : 'Attack boats can only attack enemy boats on water. Select guards to attack land assets.',
+    );
+    playSfx('error');
+    publishDebugState(layers);
+    return true;
+  }
+  if (targetEntity?.faction === 'enemy' && selectedUnits.length > 0) {
+    setBootStatus('ready', 'Selected units cannot attack that target. Select workers or guards for land targets, or attack boats for naval targets.');
+    playSfx('error');
+    publishDebugState(layers);
+    return true;
+  }
+  if (targetEntity?.kind === 'dock' && issueDockRepairCommand(targetEntity, layers)) {
+    return true;
+  }
+  if (targetEntity?.kind === 'dock' && issueFishUnloadCommand(targetEntity, layers)) {
+    return true;
+  }
+  const resourceField = pickResourceFieldAt(worldX, worldY);
+  if (resourceField && isWorldExplored(visibilityState, resourceField.x, resourceField.y) && issueHarvestMetalCommand(resourceField, layers)) {
+    return true;
+  }
+  const fishingZone = pickFishingZoneAt(worldX, worldY);
+  if (fishingZone && isWorldExplored(visibilityState, fishingZone.x, fishingZone.y) && issueFishingCommand(fishingZone, layers)) {
+    return true;
+  }
+  issueMoveCommand(worldX, worldY, layers);
+  return true;
+}
+
+function issueMobileCommandAt(worldX: number, worldY: number, layers: RenderLayers): boolean {
+  if (!isMobilePrototypeActive() || mobileCommandMode === 'select') {
+    return false;
+  }
+  if (mobileCommandMode === 'move') {
+    issueMoveCommand(worldX, worldY, layers);
+  } else {
+    issueSmartCommandAt(worldX, worldY, layers);
+  }
+  setMobileCommandMode('select');
+  return true;
+}
+
+function updateMobileTouchPointer(event: PointerEvent): void {
+  if (event.pointerType === 'touch') {
+    activeTouchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  }
+}
+
+function clearMobileTouchPointer(event: PointerEvent): void {
+  if (event.pointerType === 'touch') {
+    activeTouchPointers.delete(event.pointerId);
+  }
+  if (activeTouchPointers.size < 2) {
+    mobilePinchGesture = null;
+  }
+}
+
+function startMobileLongPress(event: PointerEvent, worldX: number, worldY: number, layers: RenderLayers): void {
+  clearMobileLongPress();
+  if (!isMobilePrototypeActive() || event.pointerType !== 'touch' || mobileCommandMode !== 'select' || selectedEntityIds.size === 0) {
+    return;
+  }
+  mobileLongPress = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    timeoutId: window.setTimeout(() => {
+      if (!mobileLongPress || mobileLongPress.pointerId !== event.pointerId) {
+        return;
+      }
+      selectionDrag = null;
+      dragPan = null;
+      issueSmartCommandAt(worldX, worldY, layers);
+      setBootStatus('ready', 'Long-press smart order issued.');
+      clearMobileLongPress();
+    }, 560),
+  };
+}
+
+function cancelMobileLongPressOnMove(event: PointerEvent): void {
+  if (!mobileLongPress || mobileLongPress.pointerId !== event.pointerId) {
+    return;
+  }
+  if (Math.hypot(event.clientX - mobileLongPress.startX, event.clientY - mobileLongPress.startY) > 10) {
+    clearMobileLongPress();
+  }
+}
+
+function clearMobileLongPress(event?: PointerEvent): void {
+  if (!mobileLongPress || (event && mobileLongPress.pointerId !== event.pointerId)) {
+    return;
+  }
+  window.clearTimeout(mobileLongPress.timeoutId);
+  mobileLongPress = null;
+}
+
+function updateMobilePinchGesture(app: Application, layers: RenderLayers): boolean {
+  if (!isMobilePrototypeActive() || activeTouchPointers.size < 2) {
+    return false;
+  }
+  const touches = [...activeTouchPointers.values()].slice(0, 2);
+  const [first, second] = touches;
+  if (!first || !second) {
+    return false;
+  }
+  const centerX = (first.x + second.x) / 2;
+  const centerY = (first.y + second.y) / 2;
+  const distance = Math.max(12, Math.hypot(second.x - first.x, second.y - first.y));
+  if (!mobilePinchGesture) {
+    mobilePinchGesture = { centerX, centerY, distance };
+    return true;
+  }
+  const before = screenToWorld(app, centerX, centerY);
+  camera.zoom = clamp(camera.zoom * (distance / mobilePinchGesture.distance), MIN_ZOOM, MAX_ZOOM);
+  camera.x = before.x - (centerX - gameElement.getBoundingClientRect().left) / camera.zoom;
+  camera.y = before.y - (centerY - gameElement.getBoundingClientRect().top) / camera.zoom;
+  camera.x -= (centerX - mobilePinchGesture.centerX) / camera.zoom;
+  camera.y -= (centerY - mobilePinchGesture.centerY) / camera.zoom;
+  mobilePinchGesture = { centerX, centerY, distance };
+  applyCamera(app, layers);
+  return true;
+}
+
 function installCameraControls(app: Application, layers: RenderLayers): void {
   gameElement.addEventListener('contextmenu', (event) => event.preventDefault());
   gameElement.addEventListener('selectstart', (event) => event.preventDefault());
@@ -4730,9 +5054,17 @@ function installCameraControls(app: Application, layers: RenderLayers): void {
     clearCombatPreview(layers);
   });
   gameElement.addEventListener('pointermove', (event) => {
+    updateMobileTouchPointer(event);
+    cancelMobileLongPressOnMove(event);
     if (pauseMenuOpen) {
       edgeScrollX = 0;
       edgeScrollY = 0;
+      return;
+    }
+    if (updateMobilePinchGesture(app, layers)) {
+      event.preventDefault();
+      selectionDrag = null;
+      dragPan = null;
       return;
     }
     const bounds = gameElement.getBoundingClientRect();
@@ -4767,8 +5099,18 @@ function installCameraControls(app: Application, layers: RenderLayers): void {
   });
   gameElement.addEventListener('pointerdown', (event) => {
     focusGameViewport();
+    if (isInteractiveUiTarget(event.target)) {
+      return;
+    }
+    updateMobileTouchPointer(event);
     if (pauseMenuOpen) {
       event.preventDefault();
+      return;
+    }
+    if (updateMobilePinchGesture(app, layers)) {
+      event.preventDefault();
+      selectionDrag = null;
+      dragPan = null;
       return;
     }
     if (placementMode && event.button === 0) {
@@ -4822,90 +5164,7 @@ function installCameraControls(app: Application, layers: RenderLayers): void {
     if (event.button === 2) {
       event.preventDefault();
       const point = screenToWorld(app, event.clientX, event.clientY);
-      const targetEntity = pickEntityAt(point.x, point.y);
-      const selectedRallyBuilding = getSelectedRallyBuilding();
-      const selectedUnits = getSelectedPlayerCommandableUnits();
-      if (selectedRallyBuilding && selectedUnits.length === 0 && issueSetBuildingRallyPoint(selectedRallyBuilding, point.x, point.y, layers)) {
-        return;
-      }
-      const hasSelectedWorker = selectedUnits.some((entity) => entity.kind === 'worker');
-      const hasSelectedLoadedMetalTruck = selectedUnits.some((entity) => entity.kind === 'truck' && entity.economy?.cargo?.kind === 'metal' && (entity.economy.cargo.amount ?? 0) > 0);
-      const hasSelectedLoadedFishWorker = selectedUnits.some((entity) => entity.kind === 'worker' && entity.economy?.cargo?.kind === 'fish' && (entity.economy.cargo.amount ?? 0) > 0);
-      const hasSelectedGuard = selectedUnits.some((entity) => entity.kind === 'guard');
-      const hasSelectedAttackBoat = selectedUnits.some((entity) => entity.kind === 'boat' && entity.economy?.combatRole === 'attack');
-      const hasSelectedSaboteur = selectedUnits.some((entity) => entity.kind === 'saboteur');
-      if (targetEntity && issueResumeConstructionCommand(targetEntity, layers)) {
-        return;
-      }
-      if (targetEntity?.faction === 'player' && issueRepairCommand(targetEntity, layers)) {
-        return;
-      }
-      if (hasSelectedLoadedMetalTruck && targetEntity?.kind === 'factory' && targetEntity.faction === 'player' && issueMetalUnloadCommand(targetEntity, layers)) {
-        return;
-      }
-      if (
-        hasSelectedLoadedFishWorker &&
-        (targetEntity?.kind === 'factory' || targetEntity?.kind === 'dock') &&
-        targetEntity.faction === 'player' &&
-        issueWorkerFishUnloadCommand(targetEntity, layers)
-      ) {
-        return;
-      }
-      if (targetEntity?.kind === 'factory' && targetEntity.faction === 'player' && hasSelectedWorker) {
-        issueAssignFactoryCrewCommand(layers, targetEntity);
-        return;
-      }
-      if (targetEntity?.faction === 'enemy' && (hasSelectedWorker || hasSelectedGuard || hasSelectedAttackBoat) && issueAttackCommand(targetEntity, layers)) {
-        renderUnits(layers);
-        updateSelectionReadout();
-        return;
-      }
-      if (targetEntity?.faction === 'enemy' && hasSelectedSaboteur && issueSabotageCommand(targetEntity, layers)) {
-        return;
-      }
-      if (targetEntity?.faction === 'enemy' && hasSelectedSaboteur && !hasSelectedGuard && !hasSelectedWorker) {
-        setBootStatus(
-          'ready',
-          targetEntity.renderable.layer === 'buildings'
-            ? 'Selected saboteurs could not reach that enemy building.'
-            : 'Saboteurs can only target enemy buildings. Select workers or guards to attack enemy land units.',
-        );
-        playSfx('error');
-        publishDebugState(layers);
-        return;
-      }
-      if (targetEntity?.faction === 'enemy' && hasSelectedAttackBoat && !hasSelectedGuard) {
-        setBootStatus(
-          'ready',
-          targetEntity.kind === 'boat'
-            ? 'Selected attack boats could not reach that enemy boat.'
-            : 'Attack boats can only attack enemy boats on water. Select guards to attack land assets.',
-        );
-        playSfx('error');
-        publishDebugState(layers);
-        return;
-      }
-      if (targetEntity?.faction === 'enemy' && selectedUnits.length > 0) {
-        setBootStatus('ready', 'Selected units cannot attack that target. Select workers or guards for land targets, or attack boats for naval targets.');
-        playSfx('error');
-        publishDebugState(layers);
-        return;
-      }
-      if (targetEntity?.kind === 'dock' && issueDockRepairCommand(targetEntity, layers)) {
-        return;
-      }
-      if (targetEntity?.kind === 'dock' && issueFishUnloadCommand(targetEntity, layers)) {
-        return;
-      }
-      const resourceField = pickResourceFieldAt(point.x, point.y);
-      if (resourceField && isWorldExplored(visibilityState, resourceField.x, resourceField.y) && issueHarvestMetalCommand(resourceField, layers)) {
-        return;
-      }
-      const fishingZone = pickFishingZoneAt(point.x, point.y);
-      if (fishingZone && isWorldExplored(visibilityState, fishingZone.x, fishingZone.y) && issueFishingCommand(fishingZone, layers)) {
-        return;
-      }
-      issueMoveCommand(point.x, point.y, layers);
+      issueSmartCommandAt(point.x, point.y, layers);
       return;
     }
 
@@ -4918,6 +5177,19 @@ function installCameraControls(app: Application, layers: RenderLayers): void {
 
     if (event.button === 0) {
       const point = screenToWorld(app, event.clientX, event.clientY);
+      if (issueMobileCommandAt(point.x, point.y, layers)) {
+        event.preventDefault();
+        return;
+      }
+      startMobileLongPress(event, point.x, point.y, layers);
+      const touchedEntity = pickEntityAt(point.x, point.y);
+      const touchedResource = pickResourceFieldAt(point.x, point.y) ?? pickFishingZoneAt(point.x, point.y);
+      if (isMobilePrototypeActive() && event.pointerType === 'touch' && !touchedEntity && !touchedResource) {
+        event.preventDefault();
+        gameElement.setPointerCapture(event.pointerId);
+        dragPan = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY };
+        return;
+      }
       gameElement.setPointerCapture(event.pointerId);
       selectionDrag = {
         pointerId: event.pointerId,
@@ -4933,6 +5205,8 @@ function installCameraControls(app: Application, layers: RenderLayers): void {
     }
   });
   gameElement.addEventListener('pointerup', (event) => {
+    clearMobileLongPress(event);
+    clearMobileTouchPointer(event);
     if (pauseMenuOpen) {
       return;
     }
@@ -4987,6 +5261,17 @@ function installCameraControls(app: Application, layers: RenderLayers): void {
       selectionDrag = null;
       drawSelectionDragOverlay(layers);
       gameElement.releasePointerCapture(event.pointerId);
+    }
+  });
+  gameElement.addEventListener('pointercancel', (event) => {
+    clearMobileLongPress(event);
+    clearMobileTouchPointer(event);
+    if (dragPan?.pointerId === event.pointerId) {
+      dragPan = null;
+    }
+    if (selectionDrag?.pointerId === event.pointerId) {
+      selectionDrag = null;
+      drawSelectionDragOverlay(layers);
     }
   });
   gameElement.addEventListener(
@@ -5263,6 +5548,11 @@ export async function createWambasaRtsApp(): Promise<void> {
     sellBuildingButtonElement.addEventListener('click', () => issueSellSelectedBuildingCommand(layers));
     sellReelsButtonElement.addEventListener('click', () => issueSellReelsCommand(layers));
     toggleAutoSellButtonElement.addEventListener('click', () => issueToggleAutoSellReels(layers));
+    mobileSelectButtonElement.addEventListener('click', () => setMobileCommandMode('select', 'Touch select active. Tap units to select or drag empty terrain to pan.'));
+    mobileSmartButtonElement.addEventListener('click', () => setMobileCommandMode('smart', 'Touch order armed. Tap a resource, target, building, or ground.'));
+    mobileMoveButtonElement.addEventListener('click', () => setMobileCommandMode('move', 'Touch move armed. Tap the destination.'));
+    mobileAttackButtonElement.addEventListener('click', () => beginAttackTarget(layers));
+    mobileMenuButtonElement.addEventListener('click', () => setPauseMenuOpen(!pauseMenuOpen, layers));
     pauseToggleButtonElement.addEventListener('click', () => setPauseMenuOpen(!pauseMenuOpen, layers));
     resumeButtonElement.addEventListener('click', () => setPauseMenuOpen(false, layers));
     musicSliderElement.addEventListener('input', () => updateAudioSetting('music', Number(musicSliderElement.value)));
@@ -5287,7 +5577,11 @@ export async function createWambasaRtsApp(): Promise<void> {
     applyAudioSettings();
     syncPauseUi();
 
-    const resizeObserver = new ResizeObserver(() => applyCamera(app, layers));
+    syncMobilePrototypeMode();
+    const resizeObserver = new ResizeObserver(() => {
+      syncMobilePrototypeMode();
+      applyCamera(app, layers);
+    });
     resizeObserver.observe(gameElement);
     document.addEventListener('fullscreenchange', focusGameViewport);
     updateMatchResultPanel();
@@ -5308,7 +5602,9 @@ export async function createWambasaRtsApp(): Promise<void> {
         focusGameViewport();
         setBootStatus(
           'ready',
-          audioState.unlocked
+          isMobilePrototypeActive()
+            ? 'Skirmish started. Touch prototype ready: tap Select, Order, Move, Attack, or Menu.'
+            : audioState.unlocked
             ? 'Skirmish started. Use arrows/WASD, edge scroll, right/middle drag, wheel zoom, minimap drag, and F10 for the menu.'
             : 'Skirmish started. Audio unavailable in this browser; controls and F10 menu are ready.',
         );
