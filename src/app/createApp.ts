@@ -80,6 +80,7 @@ type BootStatus = 'loading' | 'ready' | 'failed';
 type MobileCommandMode = 'select' | 'smart' | 'move';
 
 const MOVEMENT_RENDER_INTERVAL_SECONDS = 1 / 24;
+const ANIMATION_RENDER_INTERVAL_SECONDS = 1 / 12;
 const TRUCK_CRUSH_MINIMUM_SPEED = 42;
 
 declare global {
@@ -119,6 +120,7 @@ let nextEnemyDockId = 1;
 let nextEnemyBarracksId = 1;
 let nextEnemyGuardTowerId = 1;
 let movementRenderSeconds = 0;
+let animationRenderSeconds = 0;
 
 function pickInitialAiStrategy(): AiStrategy {
   const strategies: AiStrategy[] = ['economicBoom', 'harborPressure', 'siege'];
@@ -4373,7 +4375,10 @@ function completeNearbyBuildArrival(entity: GameEntity, layers: RenderLayers): b
 }
 
 function updateAnimationStates(deltaSeconds: number, layers: RenderLayers): boolean {
+  animationRenderSeconds += deltaSeconds;
   let changed = false;
+  let unitsChanged = false;
+  let buildingsChanged = false;
 
   for (const entity of entities) {
     const nextState = resolveAnimationAction(entity, getDamageState);
@@ -4385,6 +4390,11 @@ function updateAnimationStates(deltaSeconds: number, layers: RenderLayers): bool
     if (entity.animation.state !== nextState) {
       entity.animation = { state: nextState, direction: nextDirection, frame: 0, clock: 0 };
       changed = true;
+      if (entity.renderable.layer === 'buildings') {
+        buildingsChanged = true;
+      } else {
+        unitsChanged = true;
+      }
       continue;
     }
 
@@ -4396,16 +4406,33 @@ function updateAnimationStates(deltaSeconds: number, layers: RenderLayers): bool
       frame = (frame + steps) % entityAnimationFrameCount(entity, nextState, profile);
       entity.animation = { state: nextState, direction: nextDirection, frame, clock };
       changed = true;
+      if (entity.renderable.layer === 'buildings') {
+        buildingsChanged = true;
+      } else {
+        unitsChanged = true;
+      }
     } else if (entity.animation.direction !== nextDirection || entity.animation.clock === undefined) {
       entity.animation = { state: nextState, direction: nextDirection, frame, clock };
       changed = true;
+      if (entity.renderable.layer === 'buildings') {
+        buildingsChanged = true;
+      } else {
+        unitsChanged = true;
+      }
     } else {
       entity.animation = { ...entity.animation, clock };
     }
   }
 
-  if (changed) {
-    renderEntities(layers);
+  if (changed && animationRenderSeconds >= ANIMATION_RENDER_INTERVAL_SECONDS) {
+    animationRenderSeconds = 0;
+    if (buildingsChanged && unitsChanged) {
+      renderEntities(layers);
+    } else if (buildingsChanged) {
+      renderBuildings(layers);
+    } else {
+      renderUnits(layers);
+    }
     drawSelectionOverlay(layers);
     publishDebugStateForSimulationTick(layers);
   }

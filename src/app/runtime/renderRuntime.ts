@@ -1,7 +1,13 @@
 import type { DamageState, GameEntity } from '../../game/entities/components';
 import type { ResourceField, CoastalMapData, FishingZoneState } from '../../game/map/mapTypes';
 import type { RenderLayers } from '../../game/render/layers';
-import { renderEntityLayers, type EntityRenderContext } from '../../game/render/entityRenderer';
+import {
+  renderBuildings as renderBuildingLayer,
+  renderEffects as renderEffectLayer,
+  renderEntityLayers,
+  renderUnits as renderUnitLayer,
+  type EntityRenderContext,
+} from '../../game/render/entityRenderer';
 import { renderTerrainMap } from '../../game/render/terrainRenderer';
 
 export interface CreateRenderRuntimeOptions {
@@ -48,12 +54,16 @@ export function createRenderRuntime(options: CreateRenderRuntimeOptions): Render
   }
 
   function renderBuildings(layers: RenderLayers): void {
-    renderEntityLayers(layers, options.getEntityRenderContext());
+    const context = options.getEntityRenderContext();
+    renderBuildingLayer(layers, context);
+    renderEffectLayer(layers, context);
     options.drawCombatTargetingOverlay(layers);
   }
 
   function renderUnits(layers: RenderLayers): void {
-    renderEntityLayers(layers, options.getEntityRenderContext());
+    const context = options.getEntityRenderContext();
+    renderUnitLayer(layers, context);
+    renderEffectLayer(layers, context);
     options.drawCombatTargetingOverlay(layers);
   }
 
