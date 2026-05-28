@@ -950,12 +950,30 @@ function getAiDebugState(): RtsDebugState['ai'] {
 function getPerformanceDebugState(): RtsDebugState['performance'] {
   const averageFrameMs =
     frameSamples.length > 0 ? frameSamples.reduce((total, sample) => total + sample, 0) / frameSamples.length : lastFrameMs;
+  const renderObjects = getRenderObjectDebugCounts();
   return {
     averageFrameMs: Math.round(averageFrameMs * 10) / 10,
     lastFrameMs: Math.round(lastFrameMs * 10) / 10,
     estimatedFps: averageFrameMs > 0 ? Math.round(1000 / averageFrameMs) : 0,
     viewportWidth: Math.round(gameElement.clientWidth),
     viewportHeight: Math.round(gameElement.clientHeight),
+    renderObjects,
+  };
+}
+
+function getRenderObjectDebugCounts(): RtsDebugState['performance']['renderObjects'] {
+  const counts = {
+    terrain: debugHookLayers?.terrain.children.length ?? 0,
+    buildings: debugHookLayers?.buildings.children.length ?? 0,
+    units: debugHookLayers?.units.children.length ?? 0,
+    effects: debugHookLayers?.effects.children.length ?? 0,
+    fog: debugHookLayers?.fog.children.length ?? 0,
+    overlays: debugHookLayers?.overlays.children.length ?? 0,
+    debug: debugHookLayers?.debug.children.length ?? 0,
+  };
+  return {
+    ...counts,
+    total: Object.values(counts).reduce((total, count) => total + count, 0),
   };
 }
 

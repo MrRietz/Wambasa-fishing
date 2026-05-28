@@ -1,4 +1,4 @@
-import { Container, Graphics, Sprite } from 'pixi.js';
+import { Container, Graphics, Sprite, type Texture } from 'pixi.js';
 import { getUnitAnimationDefinition, isHumanoidAnimationUnit, resolveUnitAnimationPose } from '../art/unitAnimationManifest';
 import { getBuildingSpriteTexture, getEffectSpriteTexture, getUnitSpriteTexture, resolveSpriteFacingPresentation } from '../art/unitSpriteAssets';
 import { clamp } from '../core/math';
@@ -21,57 +21,177 @@ export function renderEntityLayers(layers: RenderLayers, context: EntityRenderCo
 }
 
 export function renderBuildings(layers: RenderLayers, context: EntityRenderContext): void {
-  clearLayerChildren(layers.buildings);
+  const liveIds = new Set<string>();
   for (const entity of context.entities) {
     if (entity.renderable.hidden || entity.renderable.layer !== 'buildings' || context.getDamageState(entity) === 'destroyed') {
       continue;
     }
-    const sprite = createBuildingSprite(entity);
-    if (sprite) {
-      layers.buildings.addChild(sprite);
-      const overlay = new Graphics({ label: `entity-${entity.id}-overlay` });
-      drawBuildingSpriteOverlay(overlay, entity, context);
-      layers.buildings.addChild(overlay);
+    const texture = getBuildingSpriteTexture(entity.kind, entity.economy?.damageState);
+    if (!texture || entity.collider.kind !== 'rect') {
+      continue;
     }
+    liveIds.add(entity.id);
+    const entry = getOrCreateEntityRenderEntry(layers.buildings, entity.id, texture);
+    updateBuildingSprite(entry.sprite, entity, texture);
+    entry.overlay.clear();
+    drawBuildingSpriteOverlay(entry.overlay, entity, context);
+    layers.buildings.addChild(entry.sprite, entry.overlay);
   }
+  pruneEntityRenderEntries(layers.buildings, liveIds);
 }
 
 export function renderUnits(layers: RenderLayers, context: EntityRenderContext): void {
-  clearLayerChildren(layers.units);
+  const liveIds = new Set<string>();
   for (const entity of context.entities) {
     if (entity.renderable.hidden || entity.renderable.layer !== 'units' || context.getDamageState(entity) === 'destroyed') {
       continue;
     }
-    const sprite = createUnitSprite(entity);
-    if (sprite) {
-      layers.units.addChild(sprite);
-      const overlay = new Graphics({ label: `entity-${entity.id}-overlay` });
-      drawUnitSpriteOverlay(overlay, entity, context);
-      layers.units.addChild(overlay);
+    const texture = resolveUnitTexture(entity);
+    if (!texture) {
+      continue;
     }
+    liveIds.add(entity.id);
+    const entry = getOrCreateEntityRenderEntry(layers.units, entity.id, texture);
+    updateUnitSprite(entry.sprite, entity, texture);
+    entry.overlay.clear();
+    drawUnitSpriteOverlay(entry.overlay, entity, context);
+    layers.units.addChild(entry.sprite, entry.overlay);
   }
+  pruneEntityRenderEntries(layers.units, liveIds);
 }
 
 export function renderEffects(layers: RenderLayers, context: EntityRenderContext): void {
-  clearLayerChildren(layers.effects);
+  const liveIds = new Set<string>();
   for (const entity of context.entities) {
     if (entity.renderable.hidden) {
       continue;
     }
-    for (const sprite of createEffectSprites(entity, context)) {
-      layers.effects.addChild(sprite);
-    }
+    const effectSprites = createEffectSpriteSpecs(entity, context);
+    if (effectSprites.length === 0) continue;
+    liveIds.add(entity.id);
+    const entry = getOrCreateEffectRenderEntry(layers.effects, entity.id);
+    syncEffectSprites(layers.effects, entry, effectSprites);
   }
-  const overlay = new Graphics({ label: 'combat-indicators' });
+  pruneEffectRenderEntries(layers.effects, liveIds);
+  const overlay = getOrCreateLayerOverlay(layers.effects);
+  overlay.clear();
   drawCombatIndicators(overlay, context);
   drawCrushEffects(overlay, context);
-  layers.effects.addChild(overlay);
 }
 
-function clearLayerChildren(layer: Container): void {
-  for (const child of layer.removeChildren()) {
-    child.destroy({ children: true });
+interface EntityRenderEntry {
+  sprite: Sprite;
+  overlay: Graphics;
+}
+
+interface EffectSpriteSpec {
+  texture: Texture;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  tint: number;
+  alpha: number;
+  rotation: number;
+}
+
+interface EffectRenderEntry {
+  sprites: Sprite[];
+}
+
+interface LayerRenderCache {
+  entities: Map<string, EntityRenderEntry>;
+  effects: Map<string, EffectRenderEntry>;
+  overlay?: Graphics;
+}
+
+const layerRenderCaches = new WeakMap<Container, LayerRenderCache>();
+
+function getLayerRenderCache(layer: Container): LayerRenderCache {
+  let cache = layerRenderCaches.get(layer);
+  if (!cache) {
+    cache = { entities: new Map(), effects: new Map() };
+    layerRenderCaches.set(layer, cache);
   }
+  return cache;
+}
+
+function getOrCreateEntityRenderEntry(layer: Container, entityId: string, texture: Texture): EntityRenderEntry {
+  const cache = getLayerRenderCache(layer);
+  const cached = cache.entities.get(entityId);
+  if (cached) {
+    return cached;
+  }
+
+  const sprite = new Sprite({ texture, label: `entity-${entityId}` });
+  const overlay = new Graphics({ label: `entity-${entityId}-overlay` });
+  const entry = { sprite, overlay };
+  cache.entities.set(entityId, entry);
+  return entry;
+}
+
+function pruneEntityRenderEntries(layer: Container, liveIds: Set<string>): void {
+  const cache = getLayerRenderCache(layer);
+  for (const [entityId, entry] of cache.entities) {
+    if (liveIds.has(entityId)) continue;
+    layer.removeChild(entry.sprite);
+    layer.removeChild(entry.overlay);
+    entry.sprite.destroy();
+    entry.overlay.destroy();
+    cache.entities.delete(entityId);
+  }
+}
+
+function getOrCreateEffectRenderEntry(layer: Container, entityId: string): EffectRenderEntry {
+  const cache = getLayerRenderCache(layer);
+  const cached = cache.effects.get(entityId);
+  if (cached) {
+    return cached;
+  }
+  const entry = { sprites: [] };
+  cache.effects.set(entityId, entry);
+  return entry;
+}
+
+function syncEffectSprites(layer: Container, entry: EffectRenderEntry, specs: EffectSpriteSpec[]): void {
+  for (let index = 0; index < specs.length; index += 1) {
+    const spec = specs[index];
+    let sprite = entry.sprites[index];
+    if (!sprite) {
+      sprite = new Sprite(spec.texture);
+      sprite.anchor.set(0.5);
+      entry.sprites[index] = sprite;
+    }
+    updateEffectSprite(sprite, spec);
+    layer.addChild(sprite);
+  }
+
+  for (let index = specs.length; index < entry.sprites.length; index += 1) {
+    layer.removeChild(entry.sprites[index]);
+    entry.sprites[index].destroy();
+  }
+  entry.sprites.length = specs.length;
+}
+
+function pruneEffectRenderEntries(layer: Container, liveIds: Set<string>): void {
+  const cache = getLayerRenderCache(layer);
+  for (const [entityId, entry] of cache.effects) {
+    if (liveIds.has(entityId)) continue;
+    for (const sprite of entry.sprites) {
+      layer.removeChild(sprite);
+      sprite.destroy();
+    }
+    cache.effects.delete(entityId);
+  }
+}
+
+function getOrCreateLayerOverlay(layer: Container): Graphics {
+  const cache = getLayerRenderCache(layer);
+  if (!cache.overlay) {
+    cache.overlay = new Graphics({ label: 'combat-indicators' });
+  }
+  layer.addChild(cache.overlay);
+  return cache.overlay;
 }
 
 const buildingSpritePresentation: Partial<Record<GameEntity['kind'], {
@@ -125,11 +245,22 @@ const buildingSpritePresentation: Partial<Record<GameEntity['kind'], {
   },
 };
 
-function createUnitSprite(entity: GameEntity): Sprite | undefined {
+function resolveUnitTexture(entity: GameEntity): Texture | undefined {
   const direction = entity.animation.direction ?? 'south';
-  const texture = getUnitSpriteTexture(entity.kind, entity.animation.state, direction, entity.animation.frame, entity.economy?.combatRole);
+  return getUnitSpriteTexture(entity.kind, entity.animation.state, direction, entity.animation.frame, entity.economy?.combatRole);
+}
+
+function createUnitSprite(entity: GameEntity): Sprite | undefined {
+  const texture = resolveUnitTexture(entity);
   if (!texture) return undefined;
   const sprite = new Sprite({ texture, label: `entity-${entity.id}` });
+  updateUnitSprite(sprite, entity, texture);
+  return sprite;
+}
+
+function updateUnitSprite(sprite: Sprite, entity: GameEntity, texture: Texture): void {
+  const direction = entity.animation.direction ?? 'south';
+  sprite.texture = texture;
   sprite.anchor.set(0.5, 0.82);
   sprite.x = entity.x;
   sprite.y = entity.y + getCollisionRadius(entity) * 0.82;
@@ -141,11 +272,8 @@ function createUnitSprite(entity: GameEntity): Sprite | undefined {
     sprite.height = 64;
   }
   const presentation = resolveSpriteFacingPresentation(entity.kind, direction);
-  if (presentation.flipX) {
-    sprite.scale.x = -Math.abs(sprite.scale.x);
-  }
+  sprite.scale.x = presentation.flipX ? -Math.abs(sprite.scale.x) : Math.abs(sprite.scale.x);
   sprite.tint = blendColors(entity.renderable.tint, factionPrimaryColor(entity), 0.04);
-  return sprite;
 }
 
 function createBuildingSprite(entity: GameEntity): Sprite | undefined {
@@ -153,6 +281,13 @@ function createBuildingSprite(entity: GameEntity): Sprite | undefined {
   const texture = getBuildingSpriteTexture(entity.kind, entity.economy?.damageState);
   if (!texture) return undefined;
   const sprite = new Sprite({ texture, label: `entity-${entity.id}` });
+  updateBuildingSprite(sprite, entity, texture);
+  return sprite;
+}
+
+function updateBuildingSprite(sprite: Sprite, entity: GameEntity, texture: Texture): void {
+  if (entity.collider.kind !== 'rect') return;
+  sprite.texture = texture;
   const construction = entity.economy?.construction;
   const presentation = buildingSpritePresentation[entity.kind] ?? buildingSpritePresentation.techLab!;
   sprite.anchor.set(0.5, presentation.anchorY);
@@ -166,8 +301,9 @@ function createBuildingSprite(entity: GameEntity): Sprite | undefined {
     const progress = clamp(construction.progressSeconds / construction.totalSeconds, 0, 1);
     sprite.alpha = 0.46 + progress * 0.36;
     sprite.tint = blendColors(sprite.tint, 0x8b7654, 0.22);
+  } else {
+    sprite.alpha = 1;
   }
-  return sprite;
 }
 
 function drawUnitSpriteOverlay(graphic: Graphics, entity: GameEntity, context: EntityRenderContext): void {
@@ -557,11 +693,11 @@ function drawDamageOverlay(
   }
 }
 
-function createEffectSprites(entity: GameEntity, context: EntityRenderContext): Sprite[] {
+function createEffectSpriteSpecs(entity: GameEntity, context: EntityRenderContext): EffectSpriteSpec[] {
   const polish = getRenderPolishState(entity, context.getDamageState);
   const damageState = context.getDamageState(entity);
   const destruction = entity.economy?.destruction;
-  const sprites: Sprite[] = [];
+  const sprites: EffectSpriteSpec[] = [];
 
   if (damageState === 'destroyed' && destruction) {
     return createDestructionEffectSprites(entity, destruction);
@@ -634,8 +770,8 @@ function createEffectSprites(entity: GameEntity, context: EntityRenderContext): 
 function createDestructionEffectSprites(
   entity: GameEntity,
   destruction: NonNullable<NonNullable<GameEntity['economy']>['destruction']>,
-): Sprite[] {
-  const sprites: Sprite[] = [];
+): EffectSpriteSpec[] {
+  const sprites: EffectSpriteSpec[] = [];
   const radius = getCollisionRadius(entity);
   const width = entity.collider.kind === 'rect' ? entity.collider.width : radius * 2;
   const height = entity.collider.kind === 'rect' ? entity.collider.height : radius * 2;
@@ -712,19 +848,12 @@ function createDestructionEffectSprites(
   return sprites;
 }
 
-function makeEffectSprite(texture: Sprite['texture'], x: number, y: number, width: number, height: number, tint: number, alpha: number): Sprite {
-  const sprite = new Sprite(texture);
-  sprite.anchor.set(0.5);
-  sprite.position.set(x, y);
-  sprite.width = width;
-  sprite.height = height;
-  sprite.tint = tint;
-  sprite.alpha = alpha;
-  return sprite;
+function makeEffectSprite(texture: Texture, x: number, y: number, width: number, height: number, tint: number, alpha: number): EffectSpriteSpec {
+  return { texture, x, y, width, height, tint, alpha, rotation: 0 };
 }
 
 function makeRotatedEffectSprite(
-  texture: Sprite['texture'],
+  texture: Texture,
   x: number,
   y: number,
   width: number,
@@ -732,10 +861,18 @@ function makeRotatedEffectSprite(
   tint: number,
   alpha: number,
   rotation: number,
-): Sprite {
-  const sprite = makeEffectSprite(texture, x, y, width, height, tint, alpha);
-  sprite.rotation = rotation;
-  return sprite;
+): EffectSpriteSpec {
+  return { texture, x, y, width, height, tint, alpha, rotation };
+}
+
+function updateEffectSprite(sprite: Sprite, spec: EffectSpriteSpec): void {
+  sprite.texture = spec.texture;
+  sprite.position.set(spec.x, spec.y);
+  sprite.width = spec.width;
+  sprite.height = spec.height;
+  sprite.tint = spec.tint;
+  sprite.alpha = spec.alpha;
+  sprite.rotation = spec.rotation;
 }
 
 function animationFacingVector(direction: AnimationDirection): { x: number; y: number } {

@@ -260,6 +260,16 @@ type RtsDebugState = {
     estimatedFps: number;
     viewportWidth: number;
     viewportHeight: number;
+    renderObjects: {
+      terrain: number;
+      buildings: number;
+      units: number;
+      effects: number;
+      fog: number;
+      overlays: number;
+      debug: number;
+      total: number;
+    };
   };
   audio: {
     supported: boolean;
@@ -810,8 +820,36 @@ test.describe('Epic 9 MVP polish', () => {
       expect(state.performance.viewportHeight).toBeGreaterThan(0);
       expect(state.performance.estimatedFps).toBeGreaterThan(0);
       expect(state.performance.averageFrameMs).toBeLessThan(80);
+      expect(state.performance.renderObjects.total).toBeGreaterThan(0);
     });
   }
+
+  test('keeps render object counts bounded during heap and memory diagnostic skirmish', async ({ page }) => {
+    test.setTimeout(35000);
+    await page.goto('/');
+    await startSkirmish(page);
+    await page.waitForFunction(() => (window.__wambasaRts?.performance.renderObjects.total ?? 0) > 0, null, { timeout: 5000 });
+
+    const initial = (await getDebugState(page)).performance.renderObjects;
+    await page.waitForFunction(() => Boolean(window.__wambasaRtsMoveEntity), null, { timeout: 5000 });
+    expect(await page.evaluate(() => window.__wambasaRtsMoveEntity?.('worker-1', 1010, 1000) ?? false)).toBe(true);
+    expect(await page.evaluate(() => window.__wambasaRtsMoveEntity?.('worker-2', 1100, 1030) ?? false)).toBe(true);
+    expect(await page.evaluate(() => window.__wambasaRtsMoveEntity?.('truck-1', 640, 920) ?? false)).toBe(true);
+    await page.waitForTimeout(1600);
+
+    const mid = (await getDebugState(page)).performance.renderObjects;
+    expect(await page.evaluate(() => window.__wambasaRtsMoveEntity?.('worker-1', 760, 920) ?? false)).toBe(true);
+    expect(await page.evaluate(() => window.__wambasaRtsMoveEntity?.('worker-2', 810, 960) ?? false)).toBe(true);
+    expect(await page.evaluate(() => window.__wambasaRtsMoveEntity?.('truck-1', 520, 920) ?? false)).toBe(true);
+    await page.waitForTimeout(1600);
+
+    const final = (await getDebugState(page)).performance.renderObjects;
+    const maxObservedTotal = Math.max(initial.total, mid.total);
+    expect(final.buildings, 'building render objects should reuse cached sprites/overlays').toBeLessThanOrEqual(Math.max(initial.buildings, mid.buildings) + 4);
+    expect(final.units, 'unit render objects should reuse cached sprites/overlays').toBeLessThanOrEqual(Math.max(initial.units, mid.units) + 8);
+    expect(final.effects, 'effect render objects should stay bounded while movement and AI update').toBeLessThanOrEqual(Math.max(initial.effects, mid.effects, 18));
+    expect(final.total, 'total Pixi render object count should not trend upward during the diagnostic window').toBeLessThanOrEqual(maxObservedTotal + 18);
+  });
 
   test('keeps F10 menu and common command states unclipped at 1920x1080 scale bounds', async ({ page }) => {
     test.setTimeout(90000);

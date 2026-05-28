@@ -238,6 +238,16 @@ export interface RtsDebugState {
     estimatedFps: number;
     viewportWidth: number;
     viewportHeight: number;
+    renderObjects: {
+      terrain: number;
+      buildings: number;
+      units: number;
+      effects: number;
+      fog: number;
+      overlays: number;
+      debug: number;
+      total: number;
+    };
   };
   audio: {
     supported: boolean;
