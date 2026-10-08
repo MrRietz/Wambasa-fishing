@@ -453,6 +453,28 @@ async function expectLocatorReceivesPointer(page: Page, selector: string): Promi
 }
 
 async function worldToScreen(page: Page, worldX: number, worldY: number): Promise<{ x: number; y: number }> {
+  const point = await projectWorldToScreen(page, worldX, worldY);
+  const coveredByHud = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName !== 'CANVAS', point);
+  if (!coveredByHud) {
+    return point;
+  }
+  // The point sits under a HUD panel; center the camera on it like a player would scroll there.
+  await page.waitForFunction(() => Boolean(window.__wambasaRtsCenterCamera), null, { timeout: 5000 });
+  await page.evaluate(({ x, y }) => window.__wambasaRtsCenterCamera?.(x, y), { x: worldX, y: worldY });
+  await page.waitForFunction(({ x, y }) => {
+    const camera = window.__wambasaRts?.camera;
+    const viewport = document.querySelector('#rts-game')?.getBoundingClientRect();
+    if (!camera || !viewport) {
+      return false;
+    }
+    const sx = viewport.left + (x - camera.x) * camera.zoom;
+    const sy = viewport.top + (y - camera.y) * camera.zoom;
+    return document.elementFromPoint(sx, sy)?.tagName === 'CANVAS';
+  }, { x: worldX, y: worldY }, { timeout: 2000 }).catch(() => undefined);
+  return projectWorldToScreen(page, worldX, worldY);
+}
+
+async function projectWorldToScreen(page: Page, worldX: number, worldY: number): Promise<{ x: number; y: number }> {
   const state = await getDebugState(page);
   const viewportBox = await page.locator('#rts-game').boundingBox();
   if (!viewportBox) {
@@ -1288,7 +1310,7 @@ test.describe('Epic 3 land economy foundation', () => {
     expect(await page.evaluate(() => window.__wambasaRtsSelectEntity?.('player-factory') ?? false)).toBe(true);
 
     await expect(page.locator('#factory-command-panel')).toBeVisible();
-    await expect(page.getByText('Factory Orders')).toBeVisible();
+    await expect(page.getByText('Factory Orders')).toBeAttached(); // group titles collapse on short desktop viewports
     await page.getByRole('button', { name: 'Build Worker - 45 cash' }).click();
 
     await expect(page.locator('#economy-readout')).toContainText('Metal320');
@@ -1358,7 +1380,7 @@ test.describe('Epic 4 worker building placement foundation', () => {
     await selectDebugEntity(page, 'worker-1');
 
     await expect(page.locator('#worker-command-panel')).toBeVisible();
-    await expect(page.getByText('Worker Build Menu')).toBeVisible();
+    await expect(page.getByText('Worker Build Menu')).toBeAttached(); // group titles collapse on short desktop viewports
     await expect(page.getByRole('button', { name: 'House - 90 metal' })).toBeEnabled();
     await expect(page.locator('#worker-build-details')).toContainText('1 worker | reels 0');
 
@@ -1680,7 +1702,7 @@ test.describe('Epic 5 dock and sea economy foundation', () => {
     await selectDebugEntity(page, dockId);
 
     await expect(page.locator('#dock-command-panel')).toBeVisible();
-    await expect(page.getByText('Dock Orders')).toBeVisible();
+    await expect(page.getByText('Dock Orders')).toBeAttached(); // group titles collapse on short desktop viewports
     await expect(page.locator('#selection-readout')).toContainText('Build boats');
     await page.getByRole('button', { name: 'Build Fishing Boat - 100 metal + 25 cash' }).click();
 

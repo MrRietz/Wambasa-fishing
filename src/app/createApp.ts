@@ -95,6 +95,7 @@ declare global {
     __wambasaRtsAttackEntity?: (attackerId: string, targetId: string) => boolean;
     __wambasaRtsSabotageEntity?: (saboteurId: string, targetId: string) => boolean;
     __wambasaRtsMoveEntity?: (entityId: string, x: number, y: number) => boolean;
+    __wambasaRtsCenterCamera?: (x: number, y: number) => boolean;
     __wambasaRtsSetFishingZoneAmount?: (zoneId: string, amount: number) => boolean;
     __wambasaRtsSelectEntity?: (entityId: string) => boolean;
     __wambasaRtsSelectEntities?: (entityIds: string[]) => boolean;
@@ -3272,6 +3273,13 @@ function installDebugTestHooks(layers?: RenderLayers): void {
       publishDebugState(debugHookLayers);
     }
     return handled;
+  };
+  window.__wambasaRtsCenterCamera = (x: number, y: number): boolean => {
+    if (!debugHookLayers || !Number.isFinite(x) || !Number.isFinite(y)) {
+      return false;
+    }
+    centerCameraOnViewport(x, y, gameElement.clientWidth, gameElement.clientHeight, debugHookLayers);
+    return true;
   };
   window.__wambasaRtsMoveEntity = (entityId: string, x: number, y: number): boolean => {
     if (!debugHookLayers || !Number.isFinite(x) || !Number.isFinite(y)) {
