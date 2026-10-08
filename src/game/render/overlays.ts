@@ -27,12 +27,17 @@ export interface ResourceInspectionTarget {
   id: string;
 }
 
+const FOOTPRINT_IDLE_ALPHA = 0.08;
+
 export function initializeWorldOverlays(layers: RenderLayers, mapData: CoastalMapData): void {
   const buildFootprints = new Graphics({ label: 'build-footprints-overlay' });
   for (const area of mapData.buildable) {
     const color = area.id.includes('player') ? 0x87e0a5 : area.id.includes('enemy') ? 0xe98174 : 0xe8d389;
-    buildFootprints.roundRect(area.x, area.y, area.width, area.height, 18).stroke({ color, width: 4, alpha: 0.3 });
+    buildFootprints.roundRect(area.x, area.y, area.width, area.height, 18).fill({ color, alpha: 0.05 });
+    buildFootprints.roundRect(area.x, area.y, area.width, area.height, 18).stroke({ color, width: 3, alpha: 0.55 });
   }
+  // Build areas are only interesting while placing a building; keep them faint otherwise.
+  buildFootprints.alpha = FOOTPRINT_IDLE_ALPHA;
 
   const selectionRings = new Graphics({ label: 'selection-rings-overlay' });
   const rallyPoints = new Graphics({ label: 'rally-points-overlay' });
@@ -67,20 +72,29 @@ export function drawSelectionOverlay(layers: RenderLayers, entities: GameEntity[
     if (!selectedEntityIds.has(entity.id)) {
       continue;
     }
+    const selectionColor = entity.faction === 'enemy' ? 0xff8a72 : entity.faction === 'neutral' ? 0xf1e3b0 : 0xb8ff9e;
     if (entity.collider.kind === 'circle') {
-      overlay.ellipse(entity.x, entity.y + entity.collider.radius * 0.62, entity.collider.radius * 1.45, entity.collider.radius * 0.62).stroke({
-        color: 0xb8ff9e,
-        width: 5,
-        alpha: 0.9,
-      });
+      // Two-tone ring at the feet: dark under-stroke for contrast on bright ground, thin bright ring on top.
+      const ringY = entity.y + entity.collider.radius * 0.78;
+      const ringRx = entity.collider.radius * 1.32;
+      const ringRy = entity.collider.radius * 0.5;
+      overlay.ellipse(entity.x, ringY, ringRx, ringRy).stroke({ color: 0x07110d, width: 4.5, alpha: 0.45 });
+      overlay.ellipse(entity.x, ringY, ringRx, ringRy).stroke({ color: selectionColor, width: 2, alpha: 0.95 });
+    } else if (entity.renderable.layer === 'units') {
+      const ringY = entity.y + entity.collider.height * 0.36;
+      const ringRx = entity.collider.width * 0.68;
+      const ringRy = entity.collider.height * 0.34;
+      overlay.ellipse(entity.x, ringY, ringRx, ringRy).stroke({ color: 0x07110d, width: 4.5, alpha: 0.45 });
+      overlay.ellipse(entity.x, ringY, ringRx, ringRy).stroke({ color: selectionColor, width: 2, alpha: 0.95 });
     } else {
-      overlay.roundRect(
+      drawCornerBrackets(
+        overlay,
         entity.x - entity.collider.width / 2 - 8,
         entity.y - entity.collider.height / 2 - 8,
         entity.collider.width + 16,
         entity.collider.height + 16,
-        20,
-      ).stroke({ color: 0xb8ff9e, width: 5, alpha: 0.88 });
+        selectionColor,
+      );
       if (entity.kind === 'guardTower') {
         overlay.circle(entity.x, entity.y, GUARD_TOWER_RANGE).stroke({ color: 0xffd166, width: 4, alpha: 0.28 });
       }
@@ -148,17 +162,21 @@ export function drawDestinationOverlay(
     for (const waypoint of entity.path) {
       overlay.lineTo(waypoint.x, waypoint.y);
     }
-    overlay.stroke({ color: 0xf6d48a, width: 3, alpha: 0.42 });
+    overlay.stroke({ color: 0xf6d48a, width: 2, alpha: 0.3 });
   }
 
-  overlay
-    .moveTo(x - 30, y)
-    .lineTo(x + 30, y)
-    .moveTo(x, y - 30)
-    .lineTo(x, y + 30)
-    .stroke({ color: 0xf6d48a, width: 5, alpha: 0.86 })
-    .circle(x, y, 24)
-    .stroke({ color: 0xf6d48a, width: 4, alpha: 0.56 });
+  // Compact waypoint marker: four inward chevrons around a small ring (the FX layer adds the click ping).
+  overlay.ellipse(x, y, 16, 8).stroke({ color: 0x07110d, width: 4, alpha: 0.35 });
+  overlay.ellipse(x, y, 16, 8).stroke({ color: 0xf6d48a, width: 2, alpha: 0.85 });
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    const tipX = x + dx * 22;
+    const tipY = y + dy * 11;
+    overlay
+      .moveTo(tipX + dx * 8 - dy * 5, tipY + dy * 5 - dx * 4)
+      .lineTo(tipX, tipY)
+      .lineTo(tipX + dx * 8 + dy * 5, tipY + dy * 5 + dx * 4);
+  }
+  overlay.stroke({ color: 0xf6d48a, width: 2.5, alpha: 0.8, cap: 'round', join: 'round' });
 }
 
 export function drawPlacementPreview(layers: RenderLayers, placementMode: PlacementMode | null): void {
@@ -168,6 +186,10 @@ export function drawPlacementPreview(layers: RenderLayers, placementMode: Placem
   }
 
   overlay.clear();
+  const footprints = getOverlayGraphic(layers, 'build-footprints-overlay');
+  if (footprints) {
+    footprints.alpha = placementMode ? 1 : FOOTPRINT_IDLE_ALPHA;
+  }
   if (!placementMode) {
     return;
   }
@@ -306,6 +328,25 @@ export function drawResourceInspectionOverlay(
 function getOverlayGraphic(layers: RenderLayers, label: string): Graphics | null {
   const child = layers.overlays.children.find((candidate) => candidate.label === label);
   return child instanceof Graphics ? child : null;
+}
+
+function drawCornerBrackets(graphic: Graphics, left: number, top: number, width: number, height: number, color: number): void {
+  const arm = Math.min(26, width * 0.22, height * 0.22);
+  const right = left + width;
+  const bottom = top + height;
+  const corners: Array<[number, number, number, number]> = [
+    [left, top, 1, 1],
+    [right, top, -1, 1],
+    [left, bottom, 1, -1],
+    [right, bottom, -1, -1],
+  ];
+  for (const strokeStyle of [{ color: 0x07110d, width: 6, alpha: 0.45 }, { color, width: 3, alpha: 0.95 }]) {
+    for (const [x, y, dx, dy] of corners) {
+      graphic.moveTo(x + dx * arm, y).lineTo(x, y).lineTo(x, y + dy * arm);
+    }
+    graphic.stroke({ ...strokeStyle, cap: 'round', join: 'round' });
+  }
+  graphic.roundRect(left, top, width, height, 10).stroke({ color, width: 1, alpha: 0.22 });
 }
 
 function isRallyBuilding(entity: GameEntity): boolean {

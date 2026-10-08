@@ -247,6 +247,15 @@ button {
   background: linear-gradient(180deg, #ffd982, #d69d34);
 }
 
+.rts-shell[data-mobile-mode="true"] .rts-mobile-command-tray {
+  z-index: 8;
+  display: grid;
+}
+
+.rts-shell[data-mobile-mode="true"] .rts-intel-panel {
+  display: none;
+}
+
 .rts-side-panel {
   position: absolute;
   top: 12px;
@@ -965,6 +974,148 @@ button {
   grid-row: 4;
 }
 
+@media (min-width: 901px) {
+  .rts-shell {
+    --rts-command-bar-height: clamp(214px, 25dvh, 272px);
+  }
+
+  .rts-side-panel {
+    width: min(360px, calc(100vw - 24px));
+  }
+
+  .rts-minimap-panel {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .rts-minimap {
+    max-height: 188px;
+  }
+
+  .rts-command-panel {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    z-index: 6;
+    width: auto;
+    height: var(--rts-command-bar-height);
+    grid-template-columns: minmax(220px, 0.22fr) minmax(0, 0.78fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    align-items: stretch;
+    pointer-events: none;
+  }
+
+  .rts-command-panel .rts-command-header {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 0;
+    pointer-events: auto;
+  }
+
+  .rts-command-panel .rts-command-hint {
+    display: -webkit-box;
+    max-height: 72px;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  .rts-command-panel .rts-selection-readout {
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 0;
+    overflow: auto;
+    pointer-events: auto;
+  }
+
+  .rts-command-panel .rts-command-grid {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    height: 100%;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 0.22fr);
+    align-content: start;
+    overflow: visible;
+    padding-right: 0;
+    pointer-events: none;
+  }
+
+  .rts-command-panel .rts-intel-panel {
+    position: fixed;
+    top: 386px;
+    right: 12px;
+    bottom: calc(var(--rts-command-bar-height) + 24px);
+    z-index: 4;
+    width: min(360px, calc(100vw - 24px));
+    min-height: 0;
+    pointer-events: auto;
+  }
+
+  .rts-command-panel .rts-factory-commands,
+  .rts-command-panel .rts-dock-commands,
+  .rts-command-panel .rts-tactical-commands {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 8px;
+    pointer-events: none;
+  }
+
+  .rts-command-panel .rts-worker-commands {
+    grid-template-columns: repeat(8, minmax(92px, 1fr));
+    gap: 8px;
+    padding: 8px;
+    pointer-events: none;
+  }
+
+  .rts-command-panel .rts-factory-commands button,
+  .rts-command-panel .rts-dock-commands button,
+  .rts-command-panel .rts-worker-commands button,
+  .rts-command-panel .rts-tactical-commands button {
+    min-height: 48px;
+    padding: 7px 7px 7px 44px;
+    pointer-events: auto;
+  }
+
+  .rts-command-panel .rts-command-group-title,
+  .rts-command-panel .rts-production-readout,
+  .rts-command-panel .rts-build-details,
+  .rts-command-panel .rts-placement-readout,
+  .rts-command-panel .rts-inline-adjuster,
+  .rts-command-panel .rts-inline-adjuster button {
+    pointer-events: auto;
+  }
+
+  .rts-command-panel .rts-command-group-title {
+    min-height: 18px;
+    padding-bottom: 0;
+  }
+
+  .rts-command-panel .rts-selection-guidance,
+  .rts-command-panel .rts-selection-order,
+  .rts-command-panel .rts-selection-stats,
+  .rts-command-panel .rts-build-details {
+    display: none;
+  }
+
+  .rts-command-panel .rts-selection-readout:hover .rts-selection-guidance,
+  .rts-command-panel .rts-selection-readout:hover .rts-selection-order,
+  .rts-command-panel .rts-selection-readout:focus-within .rts-selection-guidance,
+  .rts-command-panel .rts-selection-readout:focus-within .rts-selection-order {
+    display: block;
+  }
+
+  .rts-command-panel .rts-selection-readout:hover .rts-selection-stats,
+  .rts-command-panel .rts-selection-readout:focus-within .rts-selection-stats {
+    display: flex;
+  }
+
+  .rts-command-panel .rts-production-readout,
+  .rts-command-panel .rts-placement-readout {
+    min-height: 26px;
+    padding: 6px 8px;
+  }
+}
+
 .rts-factory-commands button:hover:not(:disabled),
 .rts-dock-commands button:hover:not(:disabled),
 .rts-worker-commands button:hover:not(:disabled),
@@ -1560,13 +1711,29 @@ button {
 }
 
 @media (max-height: 780px) and (min-width: 901px) {
+  .rts-shell {
+    --rts-command-bar-height: clamp(190px, 28dvh, 220px);
+  }
+
   .rts-side-panel {
-    width: 388px;
+    width: 348px;
     gap: 7px;
   }
 
   .rts-command-panel {
     gap: 6px;
+    width: auto;
+    height: var(--rts-command-bar-height);
+    grid-template-columns: minmax(160px, 0.2fr) minmax(0, 0.8fr);
+  }
+
+  .rts-command-panel .rts-command-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 0.18fr);
+  }
+
+  .rts-command-panel .rts-intel-panel {
+    top: 315px;
+    width: 348px;
   }
 
   .rts-side-panel header,
@@ -1595,12 +1762,29 @@ button {
     font-size: 0.72rem;
   }
 
-  .rts-factory-commands button,
-  .rts-dock-commands button,
-  .rts-worker-commands button,
-  .rts-tactical-commands button {
-    min-height: 46px;
-    padding: 7px 7px 7px 50px;
+  .rts-command-panel .rts-factory-commands,
+  .rts-command-panel .rts-dock-commands,
+  .rts-command-panel .rts-tactical-commands {
+    gap: 5px;
+    padding: 6px;
+  }
+
+  .rts-command-panel .rts-worker-commands {
+    grid-template-columns: repeat(8, minmax(76px, 1fr));
+    gap: 5px;
+    padding: 6px;
+  }
+
+  .rts-command-panel .rts-command-group-title {
+    display: none;
+  }
+
+  .rts-command-panel .rts-factory-commands button,
+  .rts-command-panel .rts-dock-commands button,
+  .rts-command-panel .rts-worker-commands button,
+  .rts-command-panel .rts-tactical-commands button {
+    min-height: 38px;
+    padding: 5px 5px 5px 36px;
   }
 
   .rts-inline-adjuster {
@@ -1730,4 +1914,266 @@ button {
   .rts-objective-item {
     font-size: 0.76rem;
   }
+}
+
+/* ------------------------------------------------------------------------------------------
+   Visual polish pass (spec-visual-polish-and-game-feel): calmer art-bible palette (muted sea
+   green, dark iron, brass accents), a readable resource bar, a see-through command bar shell
+   and consistent hover/press/focus states. Colours and decoration only - no size changes, so
+   the layout contracts covered by the e2e suite stay intact.
+   ------------------------------------------------------------------------------------------ */
+:root {
+  --rts-iron-900: #071114;
+  --rts-iron-800: #0d1b1f;
+  --rts-brass: #e3b866;
+  --rts-brass-soft: rgba(227, 184, 102, 0.32);
+  --rts-text: #eef3ea;
+  --rts-text-dim: #a9bab2;
+  --rts-metal: #e4eaec;
+  --rts-cash: #b8f07a;
+  --rts-crew: #9fd8ff;
+  --rts-housing: #ffd28a;
+}
+
+.rts-side-panel header,
+.rts-result-panel,
+.rts-minimap-panel,
+.rts-command-panel {
+  border-color: var(--rts-brass-soft);
+  background: linear-gradient(180deg, rgba(21, 39, 43, 0.94), rgba(7, 17, 20, 0.94));
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 236, 190, 0.07);
+}
+
+.rts-panel-title,
+.rts-command-group-title {
+  color: var(--rts-brass);
+}
+
+/* Resource bar: dark iron plate with colour-coded values instead of a saturated yellow block. */
+.rts-economy-readout {
+  color: var(--rts-text);
+  border-color: var(--rts-brass-soft);
+  background: linear-gradient(180deg, rgba(13, 27, 31, 0.96), rgba(7, 17, 20, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 236, 190, 0.06);
+}
+
+.rts-economy-segment,
+.rts-economy-segment[data-tone="metal"],
+.rts-economy-segment[data-tone="cash"],
+.rts-economy-segment[data-tone="crew"],
+.rts-economy-segment[data-tone="housing"] {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+}
+
+.rts-economy-segment::before {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  content: "";
+  border-radius: 0 3px 3px 0;
+  background: var(--segment-accent, var(--rts-brass));
+}
+
+.rts-economy-segment[data-tone="metal"] { --segment-accent: var(--rts-metal); }
+.rts-economy-segment[data-tone="cash"] { --segment-accent: var(--rts-cash); }
+.rts-economy-segment[data-tone="crew"] { --segment-accent: var(--rts-crew); }
+.rts-economy-segment[data-tone="housing"] { --segment-accent: var(--rts-housing); }
+
+.rts-economy-label {
+  color: var(--rts-text-dim);
+  opacity: 1;
+}
+
+.rts-economy-value {
+  color: var(--segment-accent, var(--rts-text));
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+.rts-economy-detail {
+  color: var(--rts-text-dim);
+  opacity: 1;
+}
+
+.rts-economy-segment[data-state="warning"] {
+  --segment-accent: #ff9a5a;
+  border-color: rgba(255, 154, 90, 0.55);
+  background: linear-gradient(180deg, rgba(255, 154, 90, 0.16), rgba(255, 154, 90, 0.04));
+  animation: rts-warning-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes rts-warning-pulse {
+  50% {
+    box-shadow: 0 0 0 1px rgba(255, 154, 90, 0.35), 0 0 14px rgba(255, 154, 90, 0.25);
+  }
+}
+
+/* Viewport HUD: quieter status banner, readable chips. */
+.rts-viewport-mode,
+.rts-viewport-selection,
+.rts-viewport-hotkeys {
+  border-color: rgba(227, 184, 102, 0.22);
+  background: linear-gradient(180deg, rgba(13, 27, 31, 0.86), rgba(7, 17, 20, 0.78));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+
+#boot-status.rts-viewport-mode {
+  color: var(--rts-text);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.rts-viewport-hotkeys {
+  color: var(--rts-text-dim);
+  font-weight: 700;
+}
+
+/* Command buttons: tactile hover/press, visible keyboard focus, clearer disabled state. */
+.rts-factory-commands button,
+.rts-dock-commands button,
+.rts-worker-commands button,
+.rts-tactical-commands button,
+.rts-secondary,
+.rts-primary,
+.rts-adjuster-button {
+  transition: transform 90ms ease, border-color 120ms ease, background 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+}
+
+.rts-factory-commands button,
+.rts-dock-commands button,
+.rts-worker-commands button,
+.rts-tactical-commands button,
+.rts-secondary {
+  border-color: rgba(227, 184, 102, 0.28);
+  background: linear-gradient(180deg, rgba(52, 78, 70, 0.92), rgba(22, 40, 38, 0.96));
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 241, 199, 0.08);
+}
+
+.rts-factory-commands button:hover:not(:disabled),
+.rts-dock-commands button:hover:not(:disabled),
+.rts-worker-commands button:hover:not(:disabled),
+.rts-tactical-commands button:hover:not(:disabled),
+.rts-secondary:hover {
+  border-color: rgba(255, 226, 160, 0.75);
+  background: linear-gradient(180deg, rgba(72, 104, 90, 0.96), rgba(31, 55, 50, 0.98));
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px rgba(227, 184, 102, 0.18), inset 0 1px 0 rgba(255, 241, 199, 0.12);
+}
+
+.rts-factory-commands button:active:not(:disabled),
+.rts-dock-commands button:active:not(:disabled),
+.rts-worker-commands button:active:not(:disabled),
+.rts-tactical-commands button:active:not(:disabled),
+.rts-secondary:active,
+.rts-primary:active:not(:disabled),
+.rts-adjuster-button:active:not(:disabled) {
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.35);
+  filter: brightness(0.94);
+}
+
+.rts-factory-commands button:focus-visible,
+.rts-dock-commands button:focus-visible,
+.rts-worker-commands button:focus-visible,
+.rts-tactical-commands button:focus-visible,
+.rts-secondary:focus-visible,
+.rts-primary:focus-visible,
+.rts-adjuster-button:focus-visible,
+.rts-alert-item[data-focusable="true"]:focus-visible {
+  outline: 2px solid var(--rts-brass);
+  outline-offset: 2px;
+}
+
+.rts-primary {
+  background: linear-gradient(180deg, #f1cf85, #c8913a);
+  box-shadow: 0 3px 0 rgba(77, 46, 10, 0.6), 0 10px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 250, 225, 0.55);
+}
+
+.rts-primary:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+
+.rts-factory-commands button:disabled,
+.rts-dock-commands button:disabled,
+.rts-worker-commands button:disabled,
+.rts-tactical-commands button:disabled {
+  border-style: dashed;
+  border-color: rgba(169, 186, 178, 0.22);
+  background: linear-gradient(180deg, rgba(30, 42, 42, 0.9), rgba(16, 26, 27, 0.94));
+  box-shadow: none;
+}
+
+.rts-factory-commands button span,
+.rts-dock-commands button span,
+.rts-worker-commands button span,
+.rts-tactical-commands button span {
+  color: var(--rts-text-dim);
+}
+
+/* Mission + alerts: consistent cards with a coloured spine. */
+.rts-objective-panel,
+.rts-alert-feed {
+  border-color: var(--rts-brass-soft);
+  background: linear-gradient(180deg, rgba(17, 32, 35, 0.92), rgba(7, 17, 20, 0.9));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.26);
+}
+
+.rts-objective-item[data-current="true"] {
+  border-color: rgba(227, 184, 102, 0.5);
+  background: linear-gradient(90deg, rgba(227, 184, 102, 0.16), rgba(227, 184, 102, 0.03));
+  box-shadow: inset 3px 0 0 var(--rts-brass);
+}
+
+.rts-alert-item {
+  border-color: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.035);
+  animation: rts-alert-in 220ms ease-out;
+}
+
+@keyframes rts-alert-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.rts-alert-feed:empty::before {
+  color: var(--rts-text-dim);
+  font-weight: 700;
+  font-style: italic;
+}
+
+@media (min-width: 901px) {
+  /* The command bar shell is see-through; only its populated cards are opaque, so the map stays
+     visible behind empty space. */
+  .rts-command-panel {
+    border-color: transparent;
+    background: linear-gradient(180deg, rgba(7, 17, 20, 0) 0%, rgba(7, 17, 20, 0.34) 55%, rgba(7, 17, 20, 0.6) 100%);
+    box-shadow: none;
+  }
+
+  .rts-command-panel .rts-command-header {
+    padding: 8px;
+    border: 1px solid var(--rts-brass-soft);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(21, 39, 43, 0.95), rgba(7, 17, 20, 0.94));
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+  }
+
+  .rts-command-panel .rts-selection-readout {
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+  }
+
+  .rts-command-panel .rts-intel-panel {
+    align-content: start;
+  }
+}
+
+.rts-command-hint:empty {
+  display: none;
 }

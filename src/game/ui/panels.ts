@@ -312,12 +312,27 @@ export function renderWorkerCommandPanel(
   elements.placeHouseButtonElement.setAttribute('aria-label', `House - ${houseReason}`);
   elements.placeHouseButtonElement.title = `House - ${houseReason} | +${buildingCatalog.house.capacityBonus} crew cap`;
   elements.placeHouseButtonElement.innerHTML = `House<br><span>${houseReason}</span>`;
+  syncBuildingButton(elements.placeDockButtonElement, 'dock', metal);
+  syncBuildingButton(elements.placeGuardTowerButtonElement, 'guardTower', metal);
+  syncBuildingButton(elements.placeTechLabButtonElement, 'techLab', metal);
+  syncBuildingButton(elements.placeBarracksButtonElement, 'barracks', metal);
+  syncBuildingButton(elements.placeFactoryButtonElement, 'factory', metal);
+  elements.assignFactoryCrewButtonElement.title = factoryCrewTarget
+    ? `Assign selected workers to ${factoryCrewTarget.name}`
+    : 'Right-click a completed friendly factory to set a crew target.';
   elements.assignFactoryCrewButtonElement.innerHTML = `Crew<br><span>${factoryCrewTarget ? 'factory ready' : 'right-click factory'}</span>`;
+  elements.equipReelButtonElement.title = availableReels > 0
+    ? `Equip selected workers with reels. ${availableReels} available.`
+    : 'No reels available. Produce reels with factory crew first.';
   elements.equipReelButtonElement.innerHTML = `Reel<br><span>${availableReels} available</span>`;
   elements.workerBuildDetailsElement.textContent = workerSelected ? getWorkerBuildDetailsCopy(selectedWorkerCount, availableReels) : '';
+  elements.workerBuildDetailsElement.title = workerSelected
+    ? `${selectedWorkerCount} selected worker${selectedWorkerCount === 1 ? '' : 's'} | ${availableReels} reels available`
+    : '';
   elements.placementElement.textContent = placementMode
-    ? `${buildingCatalog[placementMode.building].label}: ${placementMode.valid ? 'ready' : describePlacementReason(placementMode.reason)} | ${getPlacementDetailsCopy(placementMode.building)}`
+    ? `${buildingCatalog[placementMode.building].label}: ${placementMode.valid ? 'ready' : describePlacementReason(placementMode.reason)}`
     : 'Placement idle';
+  elements.placementElement.title = placementMode ? getPlacementDetailsCopy(placementMode.building) : 'No building placement active';
 }
 
 export function renderTacticalCommandPanel(
@@ -333,6 +348,16 @@ export function renderTacticalCommandPanel(
   elements.attackButtonElement.disabled = workers.length === 0 && guards.length === 0 && attackBoats.length === 0;
   elements.holdButtonElement.disabled = guards.length === 0;
   elements.attackMoveButtonElement.disabled = guards.length === 0;
+}
+
+function syncBuildingButton(button: HTMLButtonElement, building: keyof typeof buildingCatalog, metal: number): void {
+  const definition = buildingCatalog[building];
+  const label = definition.label.replace(/ foundation$/i, '');
+  const costLabel = `${definition.cost} metal`;
+  const reason = metal < definition.cost ? `Need ${definition.cost - metal} metal` : costLabel;
+  button.setAttribute('aria-label', `${label} - ${reason}`);
+  button.title = `${label} - ${getPlacementDetailsCopy(building)}`;
+  button.innerHTML = `${label}<br><span>${reason}</span>`;
 }
 
 export function renderBuildingCommandPanel(
@@ -477,8 +502,10 @@ function createSingleSelectionCard(
 
   const guidanceText = getEntitySelectionGuidance(entity);
   const orderText = getEntityOrderText(entity, allEntities);
+  const statRows = getEntityStatRows(entity, getFishingZone, getDamageState);
   const showGuidance = guidanceText.length > 0;
   const showOrder = !isLowValueOrderText(orderText);
+  card.title = [guidanceText, showOrder ? orderText : '', ...statRows].filter(Boolean).join(' | ');
 
   const guidance = document.createElement('div');
   guidance.className = 'rts-selection-guidance';
@@ -490,7 +517,7 @@ function createSingleSelectionCard(
 
   const stats = document.createElement('div');
   stats.className = 'rts-selection-stats';
-  for (const stat of getEntityStatRows(entity, getFishingZone, getDamageState)) {
+  for (const stat of statRows) {
     const item = document.createElement('div');
     item.className = 'rts-selection-stat';
     item.textContent = stat;

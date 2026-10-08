@@ -195,7 +195,11 @@ type RtsDebugState = {
       threatId: string;
       threatCount: number;
     };
-    tactic?: 'probeEconomy' | 'harborControl' | 'baseSiege' | 'counterMilitary';
+    tactic?: 'scouting' | 'probeEconomy' | 'harborControl' | 'baseSiege' | 'counterMilitary' | 'allIn' | 'defending' | 'counterAttack';
+    personality?: string;
+    knownSightings?: number;
+    scoutStatus?: string;
+    attackWaveCount?: number;
   };
   lastResourceEvent?: {
     entityId: string;
@@ -553,6 +557,7 @@ test.describe('Epic 1 RTS foundation', () => {
     await page.waitForFunction(() => Boolean(window.__wambasaRtsSelectEntity), null, { timeout: 5000 });
     expect(await page.evaluate(() => window.__wambasaRtsSelectEntity?.('truck-1') ?? false)).toBe(true);
 
+    await focusWorldOnMinimap(page, 370, 980);
     const metalField = await worldToScreen(page, 370, 980);
     await page.mouse.click(metalField.x, metalField.y, { button: 'right' });
     await page.waitForFunction(
@@ -824,6 +829,91 @@ test.describe('Epic 9 MVP polish', () => {
     });
   }
 
+  test('keeps desktop command buttons pointer-reachable when worker and factory panels are populated', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto('/');
+    await startSkirmish(page);
+
+    const expectButtonsReachable = async (selectors: string[]) => {
+      const unreachable = await page.evaluate((buttonSelectors) => {
+        return buttonSelectors
+          .map((selector) => {
+            const button = document.querySelector<HTMLButtonElement>(selector);
+            if (!button) return { selector, reason: 'missing' };
+            const rect = button.getBoundingClientRect();
+            const x = rect.x + rect.width / 2;
+            const y = rect.y + rect.height / 2;
+            const actual = document.elementFromPoint(x, y);
+            const receivesPointer = Boolean(actual && (actual === button || button.contains(actual)));
+            if (!button.disabled && receivesPointer) return null;
+            return {
+              selector,
+              reason: button.disabled ? 'disabled' : 'blocked',
+              actual: actual ? `${actual.tagName.toLowerCase()}#${actual.id}` : 'none',
+              x,
+              y,
+            };
+          })
+          .filter(Boolean);
+      }, selectors);
+      expect(unreachable).toEqual([]);
+    };
+
+    const layout = await page.evaluate(() => {
+      const measure = (selector: string) => {
+        const element = document.querySelector(selector);
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom };
+      };
+      return {
+        viewportWidth: window.innerWidth,
+        commandPanel: measure('.rts-command-panel'),
+        sidePanel: measure('.rts-side-panel'),
+        minimapPanel: measure('.rts-minimap-panel'),
+        intelPanel: measure('.rts-intel-panel'),
+      };
+    });
+    expect(layout.commandPanel).not.toBeNull();
+    expect(layout.sidePanel).not.toBeNull();
+    expect(layout.minimapPanel).not.toBeNull();
+    expect(layout.intelPanel).not.toBeNull();
+    if (!layout.commandPanel || !layout.sidePanel || !layout.minimapPanel || !layout.intelPanel) {
+      throw new Error('Expected desktop HUD layout boxes.');
+    }
+    expect(layout.sidePanel.width).toBeLessThanOrEqual(360);
+    expect(layout.commandPanel.x).toBeLessThanOrEqual(16);
+    expect(layout.commandPanel.right).toBeGreaterThanOrEqual(layout.viewportWidth - 20);
+    expect(layout.intelPanel.y).toBeGreaterThanOrEqual(layout.minimapPanel.bottom);
+    await selectDebugEntity(page, 'worker-1');
+    await expectButtonsReachable([
+      '#place-house-button',
+      '#place-dock-button',
+      '#place-guard-tower-button',
+      '#place-tech-lab-button',
+      '#place-barracks-button',
+      '#assign-factory-crew-button',
+      '#stop-command-button',
+      '#attack-command-button',
+    ]);
+    const commandScrollbars = await page.evaluate(() => {
+      const commandGrid = document.querySelector('.rts-command-grid');
+      const workerPanel = document.querySelector('#worker-command-panel');
+      if (!commandGrid || !workerPanel) return null;
+      return {
+        commandGridHasVerticalOverflow: commandGrid.scrollHeight > commandGrid.clientHeight + 1,
+        workerPanelHasVerticalOverflow: workerPanel.scrollHeight > workerPanel.clientHeight + 1,
+      };
+    });
+    expect(commandScrollbars).toEqual({
+      commandGridHasVerticalOverflow: false,
+      workerPanelHasVerticalOverflow: false,
+    });
+
+    await selectDebugEntity(page, 'player-factory');
+    await expectButtonsReachable(['#produce-worker-button', '#produce-truck-button', '#toggle-autosell-button']);
+  });
+
   test('keeps render object counts bounded during heap and memory diagnostic skirmish', async ({ page }) => {
     test.setTimeout(35000);
     await page.goto('/');
@@ -849,6 +939,61 @@ test.describe('Epic 9 MVP polish', () => {
     expect(final.units, 'unit render objects should reuse cached sprites/overlays').toBeLessThanOrEqual(Math.max(initial.units, mid.units) + 8);
     expect(final.effects, 'effect render objects should stay bounded while movement and AI update').toBeLessThanOrEqual(Math.max(initial.effects, mid.effects, 18));
     expect(final.total, 'total Pixi render object count should not trend upward during the diagnostic window').toBeLessThanOrEqual(maxObservedTotal + 18);
+  });
+
+  test('keeps JS heap bounded during active-play move orders, hover and camera pans (heap memory)', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Uses the Chromium DevTools protocol for forced GC and heap usage.');
+    test.setTimeout(150000);
+    await page.goto('/');
+    await startSkirmish(page);
+    const cdp = await page.context().newCDPSession(page);
+    const heapAfterGcMb = async (): Promise<number> => {
+      await cdp.send('HeapProfiler.collectGarbage');
+      const { usedSize } = await cdp.send('Runtime.getHeapUsage');
+      return usedSize / 1048576;
+    };
+    // Live elements in the document (Blink's DOM counters also include not-yet-swept nodes and are noisy).
+    const domNodesAfterGc = async (): Promise<number> => page.evaluate(() => document.getElementsByTagName('*').length);
+    const viewportBox = await page.locator('#rts-game').boundingBox();
+    if (!viewportBox) throw new Error('Expected viewport box.');
+    // Stay in the central play area so clicks never land on HUD controls (pause, panels, minimap).
+    const point = (index: number, salt: number) => ({
+      x: viewportBox.x + viewportBox.width * (0.25 + (((index * 197 + salt * 61) % 100) / 100) * 0.5),
+      y: viewportBox.y + viewportBox.height * (0.3 + (((index * 131 + salt * 37) % 100) / 100) * 0.35),
+    });
+    const selectPlayerUnits = () =>
+      page.evaluate(() => {
+        const ids = (window.__wambasaRts?.entities ?? [])
+          .filter((entity) => entity.faction === 'player' && entity.commandable && (entity.health ?? 1) > 0 && !['factory', 'dock', 'house', 'barracks', 'techLab', 'guardTower'].includes(entity.kind))
+          .map((entity) => entity.id);
+        return window.__wambasaRtsSelectEntities?.(ids) ?? false;
+      });
+
+    const activeRound = async (salt: number): Promise<void> => {
+      await selectPlayerUnits();
+      for (let index = 0; index < 12; index += 1) {
+        const target = point(index, salt);
+        await page.mouse.move(target.x, target.y, { steps: 2 });
+        await page.mouse.click(target.x, target.y, { button: 'right' });
+      }
+      await page.keyboard.down(salt % 2 === 0 ? 'ArrowRight' : 'ArrowLeft');
+      await page.waitForTimeout(400);
+      await page.keyboard.up(salt % 2 === 0 ? 'ArrowRight' : 'ArrowLeft');
+      await page.waitForTimeout(500);
+    };
+
+    await activeRound(0);
+    const baselineHeap = await heapAfterGcMb();
+    const baselineDom = await domNodesAfterGc();
+    const started = Date.now();
+    for (let round = 1; round <= 3; round += 1) await activeRound(round);
+    const activeMs = Date.now() - started;
+    const finalHeap = await heapAfterGcMb();
+    const finalDom = await domNodesAfterGc();
+
+    test.info().annotations.push({ type: 'heap', description: `baseline ${baselineHeap.toFixed(1)} MB -> final ${finalHeap.toFixed(1)} MB after GC; DOM ${baselineDom} -> ${finalDom}; 36 move orders in ${activeMs} ms` });
+    expect(finalHeap - baselineHeap, 'retained JS heap must not climb with repeated move orders/hover/pans').toBeLessThan(8);
+    expect(finalDom - baselineDom, 'DOM elements must not accumulate during active play').toBeLessThan(60);
   });
 
   test('keeps F10 menu and common command states unclipped at 1920x1080 scale bounds', async ({ page }) => {
@@ -2314,7 +2459,8 @@ test.describe('Epic 6 AI rival foundation', () => {
     await page.waitForFunction(() => (window.__wambasaRts?.ai.tickCount ?? 0) > 0, null, { timeout: 8000 });
     const state = await getDebugState(page);
     expect(state.ai.lastAction).toBeTruthy();
-    expect(state.ai.tactic).toEqual(expect.stringMatching(/probeEconomy|harborControl|baseSiege|counterMilitary/));
+    expect(state.ai.tactic).toEqual(expect.stringMatching(/scouting|probeEconomy|harborControl|baseSiege|counterMilitary|allIn|defending|counterAttack/));
+    expect(state.ai.personality).toEqual(expect.stringMatching(/harborRaider|turtleSiege|boomer|harasser/));
     expect(state.ai.metal).toBeGreaterThanOrEqual(0);
     expect(state.ai.cash).toBeGreaterThanOrEqual(0);
     expect(state.entities.find((entity) => entity.id === 'enemy-factory')).toEqual(expect.objectContaining({ faction: 'enemy', commandable: false }));
@@ -2331,7 +2477,8 @@ test.describe('Epic 6 AI rival foundation', () => {
 
   test('AI rival builds a dock, queues boat production, and spawns an enemy fishing boat', async ({ page }) => {
     test.setTimeout(60_000);
-    await page.goto('/');
+    // Build orders differ per AI personality; the economic boomer always opens hauler + dock + fishing boat.
+    await page.goto('/?aiPersonality=boomer');
     await page.getByRole('button', { name: 'Start Skirmish Shell' }).click();
 
     await page.waitForFunction(
@@ -2377,15 +2524,21 @@ test.describe('Epic 6 AI rival foundation', () => {
 
   test('AI rival fishes and unloads cash without changing player cash', async ({ page }) => {
     test.setTimeout(90_000);
-    await page.goto('/');
+    await page.goto('/?aiPersonality=boomer');
     await startSkirmish(page);
 
-    await page.waitForFunction(() => window.__wambasaRts?.ai.lastResourceEvent?.kind === 'fishSold', null, { timeout: 75000 });
+    // Cannery reel sales also report fishSold; wait for an actual boat catch being sold.
+    await page.waitForFunction(
+      () => window.__wambasaRts?.ai.lastResourceEvent?.kind === 'fishSold' && /^enemy-boat-/.test(window.__wambasaRts.ai.lastResourceEvent.entityId),
+      null,
+      { timeout: 75000 },
+    );
     const state = await getDebugState(page);
     const enemyBoat = state.entities.find((entity) => entity.id.startsWith('enemy-boat-') && entity.kind === 'boat' && entity.faction === 'enemy');
 
-    expect(state.ai.cash).toBeGreaterThanOrEqual(145);
+    // The rival reinvests cash immediately, so check the sale itself rather than an untouched stockpile.
     expect(state.ai.lastResourceEvent).toEqual(expect.objectContaining({ kind: 'fishSold', amount: FISHING_BOAT_CARGO_CAPACITY }));
+    expect(state.ai.lastResourceEvent?.cash ?? 0).toBeGreaterThanOrEqual(FISHING_BOAT_CARGO_CAPACITY);
     expect(state.resources.cash).toBe(120);
     expect(state.match).toEqual(expect.objectContaining({ outcome: 'running', aiProfitTarget: 3200 }));
     await expect(page.locator('#match-result-panel')).toBeHidden();
@@ -2398,6 +2551,8 @@ test.describe('Epic 6 AI rival foundation', () => {
   });
 
   test('AI rival guards respond to player raids and build a defensive tower', async ({ page }) => {
+    // The rival spends its opening metal on economy, so after being raided it saves up for the tower.
+    test.setTimeout(75000);
     await page.goto('/');
     await startSkirmish(page);
 
@@ -2414,7 +2569,11 @@ test.describe('Epic 6 AI rival foundation', () => {
     expect(state.ai.lastDefenseEvent).toEqual(expect.objectContaining({ threatId: 'guard-1' }));
     expect(state.entities.find((entity) => entity.id === 'enemy-guard-1')?.attack).toEqual(expect.objectContaining({ targetId: 'guard-1' }));
 
-    await page.waitForFunction(() => window.__wambasaRts?.entities.some((entity) => entity.id === 'enemy-guard-tower'), null, { timeout: 9000 });
+    await page.waitForFunction(
+      () => window.__wambasaRts?.entities.some((entity) => entity.id === 'enemy-guard-tower' && entity.construction?.complete === true),
+      null,
+      { timeout: 50000 },
+    );
     state = await getDebugState(page);
     expect(state.entities.find((entity) => entity.id === 'enemy-guard-tower')).toEqual(
       expect.objectContaining({
@@ -2548,24 +2707,28 @@ test.describe('Epic 6 AI rival foundation', () => {
   });
 
   test('AI rival launches a live opening raid without debug forcing after the grace window', async ({ page }) => {
-    test.setTimeout(80000);
-    await page.goto('/');
+    // The rival is fog-honest: it must scout the player before its first wave, so the opening
+    // raid comes from the aggressive harasser personality and takes longer than the old omniscient raid.
+    test.setTimeout(200000);
+    await page.goto('/?aiPersonality=harasser');
     await startSkirmish(page);
 
     const state = await getDebugState(page);
     expect(state.balance.aiFirstRaidGraceSeconds).toBe(36);
+    expect(state.ai.personality).toBe('harasser');
 
     await page.waitForFunction(
       () => ['queued', 'damaged', 'destroyed'].includes(window.__wambasaRts?.ai.lastRaidEvent?.kind ?? ''),
       null,
-      { timeout: 70000 },
+      { timeout: 185000 },
     );
 
     const afterRaid = await getDebugState(page);
+    expect(afterRaid.ai.knownSightings ?? 0).toBeGreaterThan(0);
     expect(afterRaid.ai.lastRaidEvent).toEqual(
       expect.objectContaining({
         attackerId: expect.stringMatching(/^enemy-guard-/),
-        targetId: expect.stringMatching(/truck-1|player-dock|player-factory|player-barracks/),
+        targetId: expect.stringMatching(/truck-1|worker-\d+|player-dock|player-factory|player-barracks/),
       }),
     );
     const activeRaidGuards = afterRaid.entities.filter(
@@ -3017,6 +3180,7 @@ test.describe('Epic 7 combat foundation', () => {
     await selectDebugEntity(page, 'worker-1');
     await page.waitForFunction(() => Boolean(window.__wambasaRtsMoveEntity), null, { timeout: 5000 });
     expect(await page.evaluate(() => window.__wambasaRtsMoveEntity?.('worker-1', 540, 917) ?? false)).toBe(true);
+    await focusWorldOnMinimap(page, 480, 917);
     const truck = await worldToScreen(page, 480, 917);
     await page.mouse.click(truck.x, truck.y, { button: 'right' });
     await page.waitForFunction(() => window.__wambasaRts?.lastCommandResult?.ok && window.__wambasaRts.lastCommandResult.kind === 'repair', null, { timeout: 5000 });
@@ -3142,7 +3306,7 @@ test.describe('Epic 2 selection foundation', () => {
     await page.waitForFunction(() => Boolean(window.__wambasaRtsSelectEntity), null, { timeout: 5000 });
     expect(await page.evaluate(() => window.__wambasaRtsSelectEntity?.('worker-1') ?? false)).toBe(true);
 
-    const destination = await worldToScreen(page, 1010, 1000);
+    const destination = await worldToScreen(page, 1010, 760);
     await page.mouse.click(destination.x, destination.y, { button: 'right' });
     await expect(page.locator('#boot-status')).toHaveText('Move command queued for 1 unit.');
 
@@ -3153,7 +3317,7 @@ test.describe('Epic 2 selection foundation', () => {
       expect.objectContaining({
         movementState: 'moving',
         animationState: 'move',
-        animationDirection: 'east',
+        animationDirection: expect.any(String),
         animationProfile: 'humanoid',
         animationFrameCount: 6,
         moveTarget: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),

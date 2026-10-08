@@ -281,11 +281,11 @@ export function resolveSpriteFacingPresentation(kind: EntityKind, direction: Ani
     return { textureDirection: direction, flipX: false };
   }
   const cardinalDirection = cardinalizeDirection(direction);
-  if (cardinalDirection === 'west' && isHumanoidAnimationUnit(kind)) {
-    return { textureDirection: 'east', flipX: true };
+  if (isHumanoidAnimationUnit(kind)) {
+    return { textureDirection: resolveHumanoidSpriteDirection(kind, cardinalDirection), flipX: false };
   }
   return {
-    textureDirection: isHumanoidAnimationUnit(kind) ? resolveHumanoidSpriteDirection(kind, cardinalDirection) : direction,
+    textureDirection: direction,
     flipX: false,
   };
 }

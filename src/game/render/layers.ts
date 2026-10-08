@@ -20,6 +20,9 @@ export function createRenderLayers(): RenderLayers {
   const fog = new Container({ label: 'fog-layer' });
   const overlays = new Container({ label: 'overlay-layer' });
   const debug = new Container({ label: 'debug-layer' });
+  // Depth-sort entities by their ground y so units walking behind buildings/other units overlap correctly.
+  buildings.sortableChildren = true;
+  units.sortableChildren = true;
 
   world.addChild(terrain, buildings, units, effects, fog, overlays, debug);
 

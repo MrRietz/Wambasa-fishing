@@ -1,4 +1,4 @@
-import { Container, Graphics, Sprite } from 'pixi.js';
+import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
 import { getFishSchoolTexture, getMetalFieldTexture, getTerrainBackdropTexture, getTerrainBlockerTexture, getTerrainObjectTexture, getTerrainPlateTexture } from '../art/unitSpriteAssets';
 import { clamp } from '../core/math';
 import type { CoastalMapData, FishSpecies, FishingZoneState, ResourceField, TerrainKind } from '../map/mapTypes';
@@ -29,6 +29,8 @@ interface TerrainAnimationState {
   waterSprites: AnimatedTerrainSprite[];
   shorelineSprites: AnimatedTerrainSprite[];
   fishSprites: AnimatedFishSprite[];
+  shimmerSprites: TilingSprite[];
+  foamLayers: Graphics[];
 }
 
 interface AnimatedFishSprite {
@@ -57,6 +59,8 @@ export function renderTerrainMap(input: TerrainRenderInput): void {
     waterSprites: [],
     shorelineSprites: [],
     fishSprites: [],
+    shimmerSprites: [],
+    foamLayers: [],
   };
   const terrainPropSprites = new Container();
 
@@ -86,6 +90,7 @@ export function renderTerrainMap(input: TerrainRenderInput): void {
       overscanTiles: 1,
     },
   });
+  addWaterShimmer(layers, mapData, animationState);
   addTerrainPlateLayer({
     layers,
     texture: getTerrainPlateTexture('shoreline'),
@@ -101,6 +106,7 @@ export function renderTerrainMap(input: TerrainRenderInput): void {
       overscanTiles: 1,
     },
   });
+  addShorelineFoam(layers, mapData, animationState);
   addTerrainPlateLayer({
     layers,
     texture: getTerrainPlateTexture('land'),
@@ -238,6 +244,92 @@ export function updateTerrainAnimation(layers: RenderLayers, elapsedSeconds: num
   animateTerrainSprites(state.waterSprites, elapsedSeconds, 1);
   animateTerrainSprites(state.shorelineSprites, elapsedSeconds, 0.65);
   animateFishSprites(state.fishSprites, elapsedSeconds);
+  animateWaterShimmer(state, elapsedSeconds);
+}
+
+// Additive, slowly counter-drifting copy of the water plate: the interference with the base water
+// tiles reads as light glinting on moving water. One TilingSprite per water region (one quad each).
+function addWaterShimmer(layers: RenderLayers, mapData: CoastalMapData, animationState: TerrainAnimationState): void {
+  const texture = getTerrainPlateTexture('water');
+  if (!texture) return;
+  for (const region of mapData.terrain) {
+    if (region.kind !== 'water') continue;
+    const shimmer = new TilingSprite({ texture, width: region.width, height: region.height, label: 'water-shimmer' });
+    shimmer.position.set(region.x, region.y);
+    shimmer.tileScale.set(1.7, 1.25);
+    shimmer.blendMode = 'add';
+    shimmer.alpha = 0.1;
+    shimmer.tint = 0x9fd8e6;
+    layers.terrain.addChild(shimmer);
+    animationState.shimmerSprites.push(shimmer);
+  }
+}
+
+// Two wavy foam lines along every shore edge that faces open water; their alpha is cross-faded
+// over time so the surf appears to roll in without redrawing any geometry.
+function addShorelineFoam(layers: RenderLayers, mapData: CoastalMapData, animationState: TerrainAnimationState): void {
+  const waterRegions = mapData.terrain.filter((tile) => tile.kind === 'water');
+  const isWater = (x: number, y: number): boolean =>
+    waterRegions.some((tile) => x >= tile.x && x <= tile.x + tile.width && y >= tile.y && y <= tile.y + tile.height);
+  const foamLayers = [new Graphics({ label: 'shore-foam-a' }), new Graphics({ label: 'shore-foam-b' })];
+  for (const shore of mapData.terrain) {
+    if (shore.kind !== 'shore') continue;
+    const sides = [
+      { x0: shore.x, y0: shore.y, x1: shore.x + shore.width, y1: shore.y, nx: 0, ny: -1 },
+      { x0: shore.x, y0: shore.y + shore.height, x1: shore.x + shore.width, y1: shore.y + shore.height, nx: 0, ny: 1 },
+      { x0: shore.x, y0: shore.y, x1: shore.x, y1: shore.y + shore.height, nx: -1, ny: 0 },
+      { x0: shore.x + shore.width, y0: shore.y, x1: shore.x + shore.width, y1: shore.y + shore.height, nx: 1, ny: 0 },
+    ];
+    for (const side of sides) {
+      const midX = (side.x0 + side.x1) / 2 + side.nx * 24;
+      const midY = (side.y0 + side.y1) / 2 + side.ny * 24;
+      if (!isWater(midX, midY)) continue;
+      foamLayers.forEach((foam, layerIndex) => {
+        drawFoamLine(foam, side, layerIndex);
+      });
+    }
+  }
+  for (const foam of foamLayers) {
+    layers.terrain.addChild(foam);
+    animationState.foamLayers.push(foam);
+  }
+}
+
+function drawFoamLine(
+  graphic: Graphics,
+  side: { x0: number; y0: number; x1: number; y1: number; nx: number; ny: number },
+  layerIndex: number,
+): void {
+  const length = Math.hypot(side.x1 - side.x0, side.y1 - side.y0);
+  const steps = Math.max(2, Math.ceil(length / 28));
+  const tangentX = (side.x1 - side.x0) / length;
+  const tangentY = (side.y1 - side.y0) / length;
+  const reach = layerIndex === 0 ? 10 : 22;
+  for (let band = 0; band < 2; band += 1) {
+    const inset = reach + band * 9;
+    for (let step = 0; step <= steps; step += 1) {
+      const distance = (step / steps) * length;
+      const wave = Math.sin(distance * 0.021 + layerIndex * 2.1 + band) * 6 + Math.sin(distance * 0.057 + band * 1.7) * 3;
+      const x = side.x0 + tangentX * distance + side.nx * (inset + wave);
+      const y = side.y0 + tangentY * distance + side.ny * (inset + wave);
+      if (step === 0) graphic.moveTo(x, y);
+      else graphic.lineTo(x, y);
+    }
+    graphic.stroke({ color: band === 0 ? 0xeef7f3 : 0xbfe6ee, width: band === 0 ? 3 : 2, alpha: band === 0 ? 0.55 : 0.32 });
+  }
+}
+
+function animateWaterShimmer(state: TerrainAnimationState, elapsedSeconds: number): void {
+  for (let index = 0; index < state.shimmerSprites.length; index += 1) {
+    const shimmer = state.shimmerSprites[index];
+    shimmer.tilePosition.set(-elapsedSeconds * 9 + Math.sin(elapsedSeconds * 0.21 + index) * 22, elapsedSeconds * 4 + Math.cos(elapsedSeconds * 0.17) * 12);
+    shimmer.alpha = 0.085 + Math.sin(elapsedSeconds * 0.6 + index) * 0.025;
+  }
+  if (state.foamLayers.length === 2) {
+    const surf = (Math.sin(elapsedSeconds * 0.9) + 1) / 2;
+    state.foamLayers[0].alpha = 0.35 + surf * 0.5;
+    state.foamLayers[1].alpha = 0.2 + (1 - surf) * 0.55;
+  }
 }
 
 function getResourceFieldStockRatio(field: ResourceField): number {

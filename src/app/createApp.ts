@@ -1,5 +1,6 @@
 import { Application } from 'pixi.js';
-import { tickAiCoordinator, type AiControllerState, type AiStrategy } from '../game/ai/aiCoordinator';
+import type { AiControllerState } from '../game/ai/aiCoordinator';
+import { AI_PERSONALITIES, isAiPersonality, pickAiPersonality, type AiPersonality } from '../game/ai/aiConfig';
 import type { AiDefenseState } from '../game/ai/aiDefenseSystem';
 import { createAiIntelState, getAiTacticLabel } from '../game/ai/aiIntelSystem';
 import { chooseAiRaidAttacker } from '../game/ai/aiPressureSystem';
@@ -36,6 +37,7 @@ import {
   pickResourceFieldAt as pickResourceFieldAtForMap,
 } from '../game/map/navigationQueries';
 import { findGridPath } from '../game/map/pathfinding';
+import { validateBuildingPlacement } from '../game/map/buildPlacement';
 import { animationFrameCount, entityAnimationFrameCount, entityAnimationFrameRate, getAnimationProfile, resolveAnimationAction, resolveAnimationDirection } from '../game/render/animationState';
 import { renderFogOfWar } from '../game/render/fogRenderer';
 import { queueAutoFishReturnToZone, queueAutoFishUnload } from '../game/simulation/systems/autoFishingLoopSystem';
@@ -51,6 +53,7 @@ import {
   initializeWorldOverlays,
 } from '../game/render/overlays';
 import { updateTerrainAnimation } from '../game/render/terrainRenderer';
+import { updateGameFx } from '../game/render/fxRenderer';
 import { resolveMobileUnitOverlaps as resolveMobileUnitOverlapsForSystem, updateTruckCrushSystem, type CrushSystemEvent } from '../game/simulation/systems/collisionSystem';
 import { updateConstructionJobs } from '../game/simulation/systems/constructionSystem';
 import { updateFishingSystem } from '../game/simulation/systems/fishingSystem';
@@ -122,17 +125,21 @@ let nextEnemyGuardTowerId = 1;
 let movementRenderSeconds = 0;
 let animationRenderSeconds = 0;
 
-function pickInitialAiStrategy(): AiStrategy {
-  const strategies: AiStrategy[] = ['economicBoom', 'harborPressure', 'siege'];
-  return strategies[Math.floor(Math.random() * strategies.length)] ?? 'siege';
+function pickInitialAiPersonality(): AiPersonality {
+  // Random per match; `?aiPersonality=<id>` forces one for playtests and e2e.
+  const forced = new URLSearchParams(window.location.search).get('aiPersonality');
+  return isAiPersonality(forced) ? forced : pickAiPersonality();
 }
 
+const initialAiPersonality = pickInitialAiPersonality();
 const aiController: AiControllerState = {
-  strategy: pickInitialAiStrategy(),
+  strategy: AI_PERSONALITIES[initialAiPersonality].strategy,
+  personality: initialAiPersonality,
   activeTactic: undefined,
   intel: undefined,
   startDelaySeconds: FIRST_SKIRMISH_BALANCE.aiStartDelaySeconds,
-  raidDelaySeconds: FIRST_SKIRMISH_BALANCE.aiFirstRaidGraceSeconds,
+  // Seconds until the rival's first wave may launch (personality timing; scouting still gates the actual attack).
+  raidDelaySeconds: AI_PERSONALITIES[initialAiPersonality].firstWaveSeconds + FIRST_SKIRMISH_BALANCE.aiStartDelaySeconds,
   territoryAlertCooldownSeconds: 0,
   harvestIssued: false,
   openingComplete: false,
@@ -152,12 +159,7 @@ const aiController: AiControllerState = {
 };
 aiController.intel = createAiIntelState(aiController.strategy);
 aiController.activeTactic = aiController.intel.tactic;
-aiController.lastAction =
-  aiController.strategy === 'economicBoom'
-    ? 'Rival initialized with economic boom plan.'
-    : aiController.strategy === 'harborPressure'
-      ? 'Rival initialized with harbor pressure plan.'
-      : 'Rival initialized with siege plan.';
+aiController.lastAction = `Rival initialized with ${AI_PERSONALITIES[initialAiPersonality].label.toLowerCase()} plan.`;
 const aiDefenseState: AiDefenseState = {
   threatCount: 0,
   defensiveStructureBuilt: false,
@@ -946,6 +948,7 @@ function getAiDebugState(): RtsDebugState['ai'] {
     lastResourceEvent: aiController.lastResourceEvent,
     lastRaidEvent: aiController.lastRaidEvent,
     lastDefenseEvent: aiController.lastDefenseEvent,
+    ...aiRuntime.getDebugInfo(),
   };
 }
 
@@ -1283,8 +1286,32 @@ const {
     })),
   getPlayerFactory: () => entities.find((entity) => entity.kind === 'factory' && entity.faction === 'player'),
   setBootStatus,
-  publishDebugState,
+  publishDebugState: publishCameraDebugState,
 });
+
+// Camera moves run every frame while edge/key scrolling. Refresh the camera field synchronously but
+// rebuild the whole debug snapshot (and objective DOM) at most 5x per second, like the simulation tick.
+// A trailing full publish keeps the snapshot current after the last throttled camera move.
+let lastCameraFullDebugPublishMs = Number.NEGATIVE_INFINITY;
+let pendingCameraDebugPublish: number | undefined;
+function publishCameraDebugState(layers: RenderLayers): void {
+  const now = performance.now();
+  const sinceFullPublishMs = now - lastCameraFullDebugPublishMs;
+  if (!debugState || sinceFullPublishMs >= 200) {
+    lastCameraFullDebugPublishMs = now;
+    publishDebugState(layers);
+    return;
+  }
+  debugState = { ...debugState, camera: { ...camera } };
+  window.__wambasaRts = debugState;
+  if (pendingCameraDebugPublish === undefined) {
+    pendingCameraDebugPublish = window.setTimeout(() => {
+      pendingCameraDebugPublish = undefined;
+      lastCameraFullDebugPublishMs = performance.now();
+      publishDebugState(layers);
+    }, 200 - sinceFullPublishMs);
+  }
+}
 
 function pickEntityAt(worldX: number, worldY: number): GameEntity | null {
   for (const entity of [...entities].reverse()) {
@@ -1771,6 +1798,10 @@ function shouldShowCombatPreview(): boolean {
 }
 
 function clearCombatPreview(layers?: RenderLayers): void {
+  // Pointer-move calls this on every hover; skip the redraw/debug publish when nothing is shown.
+  if (!combatPreviewWorld && !combatPreviewTargetId && !combatPreviewTargetValid && gameElement.dataset.combatCursor === 'none') {
+    return;
+  }
   combatPreviewWorld = undefined;
   combatPreviewTargetId = undefined;
   combatPreviewTargetValid = false;
@@ -1796,13 +1827,19 @@ function updateCombatPreviewAtPoint(worldX: number, worldY: number, layers: Rend
     return;
   }
 
+  const previousTargetId = combatPreviewTargetId;
+  const previousTargetValid = combatPreviewTargetValid;
+  const previewWasActive = Boolean(combatPreviewWorld);
   combatPreviewWorld = { x: worldX, y: worldY };
   combatPreviewTargetId = enemyTarget?.id;
   combatPreviewTargetValid = enemyTarget ? canSelectedCombatUnitsAttackTarget(enemyTarget) : false;
   gameElement.dataset.combatCursor = combatPreviewTargetValid ? 'attack-valid' : attackTargetPlacement ? 'attack-invalid' : 'none';
   updateCommandHint();
   drawCombatTargetingOverlay(layers);
-  publishDebugState(layers);
+  // Hover moves within the same target change nothing in the debug snapshot; avoid a full rebuild per pointer event.
+  if (!previewWasActive || previousTargetId !== combatPreviewTargetId || previousTargetValid !== combatPreviewTargetValid) {
+    publishDebugState(layers);
+  }
 }
 
 function selectVisibleEntitiesByKind(target: GameEntity, layers: RenderLayers, additive = false): void {
@@ -3023,20 +3060,26 @@ function updateGuardTowerDefense(deltaSeconds: number, layers: RenderLayers): bo
 }
 
 function findGuardTowerTarget(tower: GameEntity): GameEntity | undefined {
-  return entities
-    .filter(
-      (entity) =>
-        entity.faction !== tower.faction &&
-        entity.faction !== 'neutral' &&
-        (tower.faction !== 'player' || isEntityVisible(visibilityState, entity)) &&
-        (entity.economy?.health ?? 0) > 0 &&
-        Math.max(0, Math.hypot(tower.x - entity.x, tower.y - entity.y) - getCollisionRadius(tower) - getCollisionRadius(entity)) <= GUARD_TOWER_RANGE,
-    )
-    .sort(
-      (a, b) =>
-        Math.max(0, Math.hypot(tower.x - a.x, tower.y - a.y) - getCollisionRadius(tower) - getCollisionRadius(a))
-        - Math.max(0, Math.hypot(tower.x - b.x, tower.y - b.y) - getCollisionRadius(tower) - getCollisionRadius(b)),
-    )[0];
+  let nearestTarget: GameEntity | undefined;
+  let nearestDistance = Infinity;
+
+  for (const entity of entities) {
+    if (
+      entity.faction === tower.faction ||
+      entity.faction === 'neutral' ||
+      (tower.faction === 'player' && !isEntityVisible(visibilityState, entity)) ||
+      (entity.economy?.health ?? 0) <= 0
+    ) {
+      continue;
+    }
+    const distance = Math.max(0, Math.hypot(tower.x - entity.x, tower.y - entity.y) - getCollisionRadius(tower) - getCollisionRadius(entity));
+    if (distance <= GUARD_TOWER_RANGE && distance < nearestDistance) {
+      nearestTarget = entity;
+      nearestDistance = distance;
+    }
+  }
+
+  return nearestTarget;
 }
 
 const combatRuntime = createCombatRuntime({
@@ -3075,6 +3118,9 @@ const combatRuntime = createCombatRuntime({
   guardTowerDamagePerSecond: GUARD_TOWER_DAMAGE_PER_SECOND,
   findGuardTowerTarget,
   isVisibleToPlayer: (entity) => isEntityVisible(visibilityState, entity),
+  canRivalPursue: (attacker, target) => aiRuntime.canRivalPursue(attacker, target),
+  onRivalAttacked: (attackerId, targetId) => aiRuntime.reportRivalAttacked(attackerId, targetId),
+  shouldRivalDefend: (attackedAssetId) => aiRuntime.shouldRivalDefend(attackedAssetId),
 });
 
 const aiRuntime = createAiRuntime({
@@ -3097,8 +3143,8 @@ const aiRuntime = createAiRuntime({
   createEnemyConstructionSite: (id, building, x, y, builderId) =>
     createConstructionSite(id, building, x, y, builderId, {
       faction: 'enemy',
-      name: building === 'dock' ? 'Rival Dock foundation' : 'Rival Barracks foundation',
-      tint: building === 'dock' ? 0x8f5449 : 0x92564d,
+      name: building === 'dock' ? 'Rival Dock foundation' : building === 'guardTower' ? 'Rival Guard Tower foundation' : 'Rival Barracks foundation',
+      tint: building === 'dock' ? 0x8f5449 : building === 'guardTower' ? 0x8a5a4f : 0x92564d,
       autoSellReels: true,
     }),
   getConstructionWorkPoint: (site) =>
@@ -3139,11 +3185,16 @@ const aiRuntime = createAiRuntime({
   updateEnemyAutoDefense: (layers) => combatRuntime.updateEnemyAutoDefense(layers),
   issuePlayerAssetWarning,
   announceAiScout: issueRivalScoutWarning,
-  findReachableRaidPlan,
-  getAiRaidTargetPriority,
-  getAiRaidSquad,
-  getStaggeredRaidApproachPoint,
-  describeAiRaidTactic,
+  mapData,
+  getDifficulty: () => playerSettings.difficulty,
+  isValidLandPoint: isValidLandDestination,
+  isValidWaterPoint: isValidWaterDestination,
+  validateBuildingPlacement: (building, x, y) => validateBuildingPlacement({ mapData, resourceFields, entities }, building, x, y).valid,
+  getAttackApproachPoint: getStaggeredRaidApproachPoint,
+  getNextEnemyGuardTowerId: () => nextEnemyGuardTowerId,
+  setNextEnemyGuardTowerId: (value) => {
+    nextEnemyGuardTowerId = value;
+  },
 });
 
 function installDebugTestHooks(layers?: RenderLayers): void {
@@ -3458,32 +3509,6 @@ function findExposedPlayerEconomyUnit(): GameEntity | undefined {
   return scored[0]?.entity;
 }
 
-function getRaidCandidateTargets(priority?: Array<GameEntity['kind']>): GameEntity[] {
-  return entities
-    .filter(
-      (entity) =>
-        entity.faction === 'player' &&
-        (entity.economy?.health ?? 0) > 0 &&
-        (
-          entity.kind === 'truck' ||
-          entity.kind === 'boat' ||
-          entity.kind === 'dock' ||
-          entity.kind === 'barracks' ||
-          entity.kind === 'guardTower' ||
-          entity.kind === 'guard' ||
-          entity.kind === 'factory'
-        ),
-    )
-    .map((entity) => ({
-      entity,
-      score: priority
-        ? priority.includes(entity.kind) ? priority.indexOf(entity.kind) : 999
-        : entity.kind === 'truck' ? 0 : entity.kind === 'boat' ? 1 : entity.kind === 'dock' ? 2 : entity.kind === 'barracks' ? 3 : entity.kind === 'guardTower' ? 4 : 5,
-    }))
-    .sort((a, b) => a.score - b.score)
-    .map((entry) => entry.entity);
-}
-
 function getRaidApproachPoint(target: GameEntity): { x: number; y: number } {
   const radius = getCollisionRadius(target);
   const candidates = [
@@ -3498,100 +3523,6 @@ function getRaidApproachPoint(target: GameEntity): { x: number; y: number } {
     }
   }
   return { x: target.x, y: target.y };
-}
-
-function getReachableRaidApproachPoint(attacker: GameEntity, target: GameEntity): { x: number; y: number } | undefined {
-  const radius = getCollisionRadius(target);
-  const candidates = [
-    { x: target.x + radius + 44, y: target.y },
-    { x: target.x - radius - 44, y: target.y },
-    { x: target.x, y: target.y + radius + 44 },
-    { x: target.x, y: target.y - radius - 44 },
-  ].filter((point) => isValidLandDestination(point.x, point.y));
-
-  for (const point of candidates) {
-    const path = findEntityLandPath(attacker, { x: attacker.x, y: attacker.y }, point);
-    if (path.length > 0) {
-      return point;
-    }
-  }
-  return undefined;
-}
-
-function findReachableRaidPlan(attacker: GameEntity, priority?: Array<GameEntity['kind']>): { target: GameEntity; targetPoint: { x: number; y: number }; path: { x: number; y: number }[] } | undefined {
-  for (const target of getRaidCandidateTargets(priority)) {
-    const targetPoint = getReachableRaidApproachPoint(attacker, target);
-    if (!targetPoint) {
-      continue;
-    }
-    const path = findEntityLandPath(attacker, { x: attacker.x, y: attacker.y }, targetPoint);
-    if (path.length > 0) {
-      return { target, targetPoint, path };
-    }
-  }
-  return undefined;
-}
-
-function getAiRaidTargetPriority(): Array<GameEntity['kind']> {
-  const cycle = aiController.raidCount % 2;
-  if (aiController.activeTactic === 'probeEconomy') {
-    return cycle === 0 ? ['truck', 'factory', 'dock', 'boat', 'barracks'] : ['factory', 'truck', 'dock', 'boat', 'barracks'];
-  }
-  if (aiController.activeTactic === 'harborControl') {
-    return cycle === 0 ? ['dock', 'boat', 'truck', 'factory', 'barracks'] : ['boat', 'dock', 'factory', 'truck', 'barracks'];
-  }
-  if (aiController.activeTactic === 'counterMilitary') {
-    return cycle === 0 ? ['guardTower', 'barracks', 'guard', 'dock', 'factory'] : ['barracks', 'guardTower', 'factory', 'dock', 'boat'];
-  }
-  return cycle === 0 ? ['factory', 'barracks', 'dock', 'truck', 'boat'] : ['barracks', 'factory', 'truck', 'dock', 'boat'];
-}
-
-function describeAiRaidTactic(): string {
-  if (aiController.activeTactic === 'probeEconomy') {
-    return aiController.raidCount % 2 === 0 ? 'economic harassment' : 'timing push';
-  }
-  if (aiController.activeTactic === 'harborControl') {
-    return aiController.raidCount % 2 === 0 ? 'harbor strike' : 'coastal pressure';
-  }
-  if (aiController.activeTactic === 'counterMilitary') {
-    return aiController.raidCount % 2 === 0 ? 'counter-patrol' : 'defense break';
-  }
-  return aiController.raidCount % 2 === 0 ? 'siege' : 'base crack';
-}
-
-function getAiRaidSquad(leadAttacker: GameEntity, target: GameEntity): GameEntity[] {
-  const desiredSize = getDesiredAiRaidSquadSize();
-  const candidates = entities.filter(
-    (entity) =>
-      entity.faction === 'enemy' &&
-      getDamageState(entity) !== 'destroyed' &&
-      entity.movement.speed > 0 &&
-      entity.movement.state === 'idle' &&
-      !entity.economy?.attack &&
-      !entity.economy?.buildJob &&
-      entity.kind === 'guard',
-  );
-  const prioritized = candidates.sort((a, b) => {
-    const scoreA = a.id === leadAttacker.id ? -2 : a.kind === 'guard' ? 0 : 2;
-    const scoreB = b.id === leadAttacker.id ? -2 : b.kind === 'guard' ? 0 : 2;
-    return scoreA - scoreB || Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y);
-  });
-  const minimumReadySize = aiController.raidCount === 0 ? 1 : desiredSize;
-  if (prioritized.length < minimumReadySize) {
-    return [];
-  }
-  return prioritized.slice(0, Math.min(desiredSize, prioritized.length));
-}
-
-function getDesiredAiRaidSquadSize(): number {
-  const baseSize =
-    aiController.activeTactic === 'baseSiege' || aiController.strategy === 'siege'
-      ? FIRST_SKIRMISH_COMBAT_PRESSURE.desiredRaidSquadSize.siege
-      : aiController.activeTactic === 'probeEconomy'
-        ? FIRST_SKIRMISH_COMBAT_PRESSURE.desiredRaidSquadSize.probeEconomy
-        : FIRST_SKIRMISH_COMBAT_PRESSURE.desiredRaidSquadSize.standard;
-  const adjustment = FIRST_SKIRMISH_COMBAT_PRESSURE.difficultyRaidSquadAdjustment[playerSettings.difficulty];
-  return Math.max(1, baseSize + adjustment);
 }
 
 function getStaggeredRaidApproachPoint(target: GameEntity, index: number, count: number): { x: number; y: number } {
@@ -3786,18 +3717,30 @@ function getMovementProbeCircle(worldX: number, worldY: number, movingEntity?: G
 }
 
 function isBlockedByStaticEntity(worldX: number, worldY: number, movingEntity?: GameEntity): boolean {
-  const ignoredTargetId = getMovementBlockerIgnoredTargetId(movingEntity);
   const movingCircle = getMovementProbeCircle(worldX, worldY, movingEntity);
+  return getStaticBlockerRects(movingEntity).some((rect) => rectCircleOverlap(rect, movingCircle));
+}
 
-  return entities
-    .filter((entity) => entity.id !== movingEntity?.id && entity.id !== ignoredTargetId)
-    .filter((entity) => getDamageState(entity) !== 'destroyed' && !entity.renderable.hidden)
-    .filter((entity) => entity.renderable.layer === 'buildings' || entity.movement.speed <= 0)
-    .some((entity) => rectCircleOverlap(getEntityRect(entity), movingCircle));
+/** Rects of buildings/stationary entities that block `movingEntity`; constant during one path search. */
+function getStaticBlockerRects(movingEntity?: GameEntity): RectData[] {
+  const ignoredTargetId = getMovementBlockerIgnoredTargetId(movingEntity);
+  const rects: RectData[] = [];
+  for (const entity of entities) {
+    if (entity.id === movingEntity?.id || entity.id === ignoredTargetId) continue;
+    if (getDamageState(entity) === 'destroyed' || entity.renderable.hidden) continue;
+    if (entity.renderable.layer !== 'buildings' && entity.movement.speed > 0) continue;
+    rects.push(getEntityRect(entity));
+  }
+  return rects;
 }
 
 function isBlockedByLandObject(worldX: number, worldY: number, movingEntity?: GameEntity): boolean {
-  const movingCircle = getMovementProbeCircle(worldX, worldY, movingEntity);
+  return isLandObjectOverlappingCircle(getMovementProbeCircle(worldX, worldY, movingEntity));
+}
+
+function isLandObjectOverlappingCircle(movingCircle: CircleData): boolean {
+  const worldX = movingCircle.x;
+  const worldY = movingCircle.y;
   return (
     resourceFields.some(
       (field) =>
@@ -4034,7 +3977,13 @@ function reportCommandResult(result: CommandResult, layers: RenderLayers): void 
 }
 
 function findLandPath(start: { x: number; y: number }, goal: { x: number; y: number }): Array<{ x: number; y: number }> {
-  return findGridPath(start, goal, (worldX, worldY) => isValidLandDestination(worldX, worldY) && !isBlockedByLandObject(worldX, worldY));
+  const probe = getMovementProbeCircle(start.x, start.y);
+  return findGridPath(start, goal, (worldX, worldY) => {
+    if (!isValidLandDestination(worldX, worldY)) return false;
+    probe.x = worldX;
+    probe.y = worldY;
+    return !isLandObjectOverlappingCircle(probe);
+  });
 }
 
 function findEntityLandPath(
@@ -4042,13 +3991,19 @@ function findEntityLandPath(
   start: { x: number; y: number },
   goal: { x: number; y: number },
 ): Array<{ x: number; y: number }> {
+  // Blockers and the probe radius cannot change during the synchronous search: compute them once
+  // instead of per grid cell (this predicate runs tens of thousands of times per move order).
+  const staticBlockerRects = getStaticBlockerRects(entity);
+  const probe = getMovementProbeCircle(start.x, start.y, entity);
   return findGridPath(
     start,
     goal,
-    (worldX, worldY) =>
-      isValidLandDestination(worldX, worldY) &&
-      !isBlockedByLandObject(worldX, worldY, entity) &&
-      !isBlockedByStaticEntity(worldX, worldY, entity),
+    (worldX, worldY) => {
+      if (!isValidLandDestination(worldX, worldY)) return false;
+      probe.x = worldX;
+      probe.y = worldY;
+      return !isLandObjectOverlappingCircle(probe) && !staticBlockerRects.some((rect) => rectCircleOverlap(rect, probe));
+    },
   );
 }
 
@@ -5509,6 +5464,16 @@ function installCameraControls(app: Application, layers: RenderLayers): void {
       evaluateMatchEnd(layers);
       updateAnimationStates(deltaSeconds, layers);
       updateFogOfWarThrottled(deltaSeconds, layers);
+      updateGameFx({
+        layers,
+        stage: app.stage,
+        nowSeconds: simulationClockSeconds,
+        entities,
+        isVisible: (entity) => isEntityVisible(visibilityState, entity),
+        playerCash: economyState.cash,
+        lastResourceEvent,
+        lastMoveCommand,
+      });
       publishDebugStateForSimulationTick(layers);
     }
 

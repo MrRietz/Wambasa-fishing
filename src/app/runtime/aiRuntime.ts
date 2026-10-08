@@ -1,28 +1,40 @@
-import { tickAiCoordinator, type AiControllerState } from '../../game/ai/aiCoordinator';
-import { chooseAiRaidAttacker } from '../../game/ai/aiPressureSystem';
+import { getAiPersonality, tickAiCoordinator, type AiControllerState } from '../../game/ai/aiCoordinator';
+import { getAiRaidDamage, isAiLandMilitary, updateAiArmy, type AiArmyObjective } from '../../game/ai/aiArmy';
+import {
+  buildAiBrainDebugState,
+  ensureAiBrainState,
+  updateAiScoutRun,
+  type AiBrainDebugState,
+  type AiBrainState,
+  type AiPointOfInterest,
+} from '../../game/ai/aiBrain';
+import { AI_DIFFICULTY, AI_MEMORY_TUNING, AI_PERSONALITIES, type AiBuildItem, type AiDifficulty } from '../../game/ai/aiConfig';
+import { countAiOwnAssets } from '../../game/ai/aiEconomyPlanner';
+import {
+  describeObservedPlayer,
+  ensureAiIntelState,
+  getAiTacticLabel,
+  updateAdaptiveTactic,
+} from '../../game/ai/aiIntelSystem';
+import {
+  getSightingCombatValue,
+  revealAttacker,
+  summarizeAiMemory,
+  updateAiPerception,
+} from '../../game/ai/aiMemory';
 import {
   executeHarvestMetalCommand,
   executeProductionCommand,
   type MoveCommandSummary,
 } from '../../game/commands/commandHandlers';
 import { buildingCatalog, type BuildingPlanKind } from '../../game/data/buildings';
-import { FIRST_SKIRMISH_COMBAT_PRESSURE } from '../../game/config/constants';
 import type { ProductionKind } from '../../game/data/production';
 import { productionCatalog } from '../../game/data/production';
 import type { DamageState, GameEntity } from '../../game/entities/components';
-import {
-  chooseScoutTarget,
-  chooseScoutUnit,
-  ensureAiIntelState,
-  getAiTacticLabel,
-  mergeObservedPlayerState,
-  scanPlayerIntel,
-  updateAdaptiveTactic,
-  updateScoutTimers,
-} from '../../game/ai/aiIntelSystem';
 import { updateProductionQueues } from '../../game/simulation/systems/productionSystem';
-import type { FishingZoneState, ResourceField } from '../../game/map/mapTypes';
+import type { CoastalMapData, FishingZoneState, ResourceField } from '../../game/map/mapTypes';
 import type { RenderLayers } from '../../game/render/layers';
+import { getVisionRadius } from '../../game/visibility/fogOfWar';
 
 type PathPoint = { x: number; y: number };
 
@@ -30,8 +42,10 @@ export interface CreateAiRuntimeOptions {
   entities: GameEntity[];
   resourceFields: ResourceField[];
   fishingZoneStates: FishingZoneState[];
+  mapData: Pick<CoastalMapData, 'baseAreas' | 'dockPoints'>;
   aiController: AiControllerState;
   aiEconomyState: { metal: number; cash: number };
+  getDifficulty: () => AiDifficulty;
   mapDockPoint: () => { x: number; y: number } | undefined;
   getDamageState: (entity: GameEntity) => DamageState | undefined;
   getMaxHealth: (entity: GameEntity) => number;
@@ -39,9 +53,13 @@ export interface CreateAiRuntimeOptions {
   findEntityLandPath?: (entity: GameEntity, start: PathPoint, goal: PathPoint) => PathPoint[];
   findTruckLandPath?: (truck: GameEntity, start: PathPoint, goal: PathPoint) => PathPoint[];
   findWaterPath: (start: PathPoint, goal: PathPoint) => PathPoint[];
+  isValidLandPoint: (x: number, y: number) => boolean;
+  isValidWaterPoint: (x: number, y: number) => boolean;
+  validateBuildingPlacement: (building: BuildingPlanKind, x: number, y: number) => boolean;
   getResourceInteractionPoint: (field: ResourceField) => PathPoint;
   getDockUnloadPoint: (dock: GameEntity) => PathPoint;
   getFishingInteractionPoint: (zone: FishingZoneState) => PathPoint;
+  getAttackApproachPoint: (target: GameEntity, index: number, count: number) => PathPoint;
   spawnAiProducedUnit: (product: ProductionKind, producer: GameEntity) => GameEntity;
   createEnemyConstructionSite: (id: string, building: BuildingPlanKind, x: number, y: number, builderId: string) => GameEntity;
   getConstructionWorkPoint: (site: GameEntity) => PathPoint;
@@ -52,6 +70,8 @@ export interface CreateAiRuntimeOptions {
   setNextEnemyDockId: (value: number) => void;
   getNextEnemyBarracksId: () => number;
   setNextEnemyBarracksId: (value: number) => void;
+  getNextEnemyGuardTowerId: () => number;
+  setNextEnemyGuardTowerId: (value: number) => void;
   setLastMoveCommand: (value: MoveCommandSummary | undefined) => void;
   renderBuildings: (layers: RenderLayers) => void;
   renderUnits: (layers: RenderLayers) => void;
@@ -64,68 +84,256 @@ export interface CreateAiRuntimeOptions {
   updateEnemyAutoDefense: (layers: RenderLayers) => boolean;
   issuePlayerAssetWarning: (target: GameEntity, phase: 'incoming' | 'damaged' | 'destroyed') => void;
   announceAiScout: (message: string, focusWorld: PathPoint) => void;
-  findReachableRaidPlan: (attacker: GameEntity, priority?: Array<GameEntity['kind']>) => { target: GameEntity; targetPoint: PathPoint; path: PathPoint[] } | undefined;
-  getAiRaidTargetPriority: () => Array<GameEntity['kind']>;
-  getAiRaidSquad: (leadAttacker: GameEntity, target: GameEntity) => GameEntity[];
-  getStaggeredRaidApproachPoint: (target: GameEntity, index: number, count: number) => PathPoint;
-  describeAiRaidTactic: () => string;
 }
 
 export interface AiRuntime {
   updateAiRival: (deltaSeconds: number, layers: RenderLayers) => boolean;
+  /** A player entity damaged a rival asset: the attacker's position becomes known. */
+  reportRivalAttacked: (attackerId: string, targetId: string) => void;
+  /** Fog-honest pursuit check for rival attackers (target visible to the rival or to the attacker itself). */
+  canRivalPursue: (attacker: GameEntity, target: GameEntity) => boolean;
+  /** True when the attacked rival asset is part of the home base (defense controller should respond). */
+  shouldRivalDefend: (attackedAssetId: string) => boolean;
+  getDebugInfo: () => AiBrainDebugState | undefined;
 }
 
+const STUCK_SECONDS = 7;
+const STUCK_EPSILON = 10;
+const FORWARD_RALLY_DISTANCE = 1900;
+
 export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
-  function getAiIntel() {
+  const entityById = new Map<string, GameEntity>();
+  const progressTrack = new Map<string, { x: number; y: number; stuckSeconds: number }>();
+  const reservedIds = new Set<string>();
+  const scratchSiteBuilders = new Set<string>();
+  let pointsOfInterest: AiPointOfInterest[] | undefined;
+  let rallyPoint: PathPoint | undefined;
+  let workerParking: PathPoint | undefined;
+  let lastScoutAnnounceAt = Number.NEGATIVE_INFINITY;
+  const unreachableFieldUntil = new Map<string, number>();
+
+  function getDifficultyId(): AiDifficulty {
+    return options.getDifficulty();
+  }
+
+  function getBrain(): AiBrainState {
+    const controller = options.aiController;
+    controller.personality = getAiPersonality(controller);
+    controller.brain = ensureAiBrainState(controller.brain, controller.personality, controller.difficulty ?? 'normal');
+    return controller.brain;
+  }
+
+  function getIntel() {
     options.aiController.intel = ensureAiIntelState(options.aiController.intel, options.aiController.strategy);
     options.aiController.activeTactic = options.aiController.intel.tactic;
     return options.aiController.intel;
   }
 
-  function issueAiHarvestCommand(layers: RenderLayers): boolean {
-    const truck = options.entities.find(
-      (entity) =>
-        entity.kind === 'truck' &&
-        entity.faction === 'enemy' &&
-        entity.economy?.cargo &&
-        entity.movement.state === 'idle' &&
-        options.getDamageState(entity) !== 'destroyed',
-    );
-    const field = options.resourceFields.find((candidate) => candidate.id === 'enemy-metal');
-    if (
-      !truck ||
-      !field ||
-      truck.kind !== 'truck' ||
-      truck.faction !== 'enemy' ||
-      !truck.economy?.cargo ||
-      truck.movement.state !== 'idle' ||
-      truck.economy.harvesting ||
-      field.amount <= 0
-    ) {
-      return false;
+  function indexEntities(): void {
+    entityById.clear();
+    for (const entity of options.entities) {
+      entityById.set(entity.id, entity);
     }
+  }
 
-    const output = executeHarvestMetalCommand({
-      field,
-      selectedUnits: [truck],
-      findLandPath: options.findLandPath,
-      findTruckLandPath: options.findTruckLandPath,
-      getResourceInteractionPoint: (resourceField) => options.getResourceInteractionPoint(resourceField),
-      faction: 'enemy',
-      requireCommandable: false,
-    });
-    if (!output.result?.ok) {
-      options.aiController.lastAction = 'Rival harvest blocked: no route to enemy metal.';
-      return false;
-    }
+  function isAlive(entity: GameEntity): boolean {
+    return options.getDamageState(entity) !== 'destroyed' && (entity.economy?.health ?? 1) > 0;
+  }
 
-    if (output.moveCommand) {
-      options.setLastMoveCommand(output.moveCommand);
+  function getHome(): GameEntity | undefined {
+    for (const entity of options.entities) {
+      if (entity.kind === 'enemyFactory' && entity.faction === 'enemy' && isAlive(entity)) return entity;
     }
-    options.aiController.harvestIssued = true;
-    options.aiController.lastAction = 'Rival harvest command queued.';
-    options.drawDestinationOverlay(layers);
+    return undefined;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Movement helpers
+  // ---------------------------------------------------------------------------------------------
+
+  function findPathFor(unit: GameEntity, goal: PathPoint): PathPoint[] {
+    return options.findEntityLandPath?.(unit, { x: unit.x, y: unit.y }, goal) ?? options.findLandPath({ x: unit.x, y: unit.y }, goal);
+  }
+
+  function moveLand(unit: GameEntity, point: PathPoint): boolean {
+    const offsets = [0, 70, -70, 140];
+    for (const offset of offsets) {
+      const goal = { x: point.x + offset, y: point.y + (offset === 0 ? 0 : offset / 2) };
+      if (!options.isValidLandPoint(goal.x, goal.y)) continue;
+      const path = findPathFor(unit, goal);
+      if (path.length > 0) {
+        unit.path = path;
+        unit.moveTarget = path[0];
+        unit.movement.state = 'moving';
+        progressTrack.delete(unit.id);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function moveWater(boat: GameEntity, point: PathPoint): boolean {
+    const goal = options.isValidWaterPoint(point.x, point.y) ? point : waterPointNear(point);
+    if (!goal) return false;
+    const path = options.findWaterPath({ x: boat.x, y: boat.y }, goal);
+    if (path.length === 0) return false;
+    boat.path = path;
+    boat.moveTarget = path[0];
+    boat.movement.state = 'moving';
+    boat.economy = { ...boat.economy, fishing: undefined, unloadingFish: undefined };
+    progressTrack.delete(boat.id);
     return true;
+  }
+
+  function waterPointNear(point: PathPoint): PathPoint | undefined {
+    if (options.isValidWaterPoint(point.x, point.y)) return { x: point.x, y: point.y };
+    for (const radius of [90, 170, 250]) {
+      for (let step = 0; step < 8; step += 1) {
+        const angle = (step / 8) * Math.PI * 2 - Math.PI / 2;
+        const x = point.x + Math.cos(angle) * radius;
+        const y = point.y + Math.sin(angle) * radius;
+        if (options.isValidWaterPoint(x, y)) return { x, y };
+      }
+    }
+    return undefined;
+  }
+
+  function isLandReachable(point: PathPoint): boolean {
+    for (let step = 0; step < 8; step += 1) {
+      const angle = (step / 8) * Math.PI * 2;
+      if (options.isValidLandPoint(point.x + Math.cos(angle) * 85, point.y + Math.sin(angle) * 85)) return true;
+    }
+    return false;
+  }
+
+  function setAttack(unit: GameEntity, targetId: string, phase: 'to-target' | 'attacking', leash?: { x: number; y: number; range: number }): void {
+    const damage = getAiRaidDamage(unit);
+    unit.economy = {
+      ...unit.economy,
+      harvesting: undefined,
+      shoreFishing: undefined,
+      fishing: undefined,
+      attack: { targetId, phase, damagePerSecond: damage.damagePerSecond, range: damage.range, leash },
+    };
+  }
+
+  /** Attack a target the rival currently sees. */
+  function attackVisible(unit: GameEntity, target: GameEntity, leash?: { x: number; y: number; range: number }): boolean {
+    if (unit.kind === 'boat') {
+      const point = waterPointNear(target) ?? { x: target.x, y: target.y };
+      const path = options.findWaterPath({ x: unit.x, y: unit.y }, point);
+      unit.path = path;
+      unit.moveTarget = path[0];
+      unit.movement.state = path.length > 0 ? 'moving' : 'idle';
+      setAttack(unit, target.id, path.length > 0 ? 'to-target' : 'attacking', leash);
+      return true;
+    }
+    const approach = options.getAttackApproachPoint(target, 0, 1);
+    const path = findPathFor(unit, approach);
+    if (path.length === 0 && Math.hypot(unit.x - target.x, unit.y - target.y) > 200) {
+      return false;
+    }
+    unit.path = path;
+    unit.moveTarget = path[0];
+    unit.movement.state = path.length > 0 ? 'moving' : 'idle';
+    setAttack(unit, target.id, path.length > 0 ? 'to-target' : 'attacking', leash);
+    progressTrack.delete(unit.id);
+    return true;
+  }
+
+  /** Wave launch against a remembered target: march to the remembered spot with the attack order set. */
+  function attackRemembered(unit: GameEntity, objective: AiArmyObjective): boolean {
+    if (!moveLand(unit, objective)) return false;
+    if (objective.targetId) setAttack(unit, objective.targetId, 'to-target');
+    return true;
+  }
+
+  function canRivalPursue(attacker: GameEntity, target: GameEntity): boolean {
+    const brain = options.aiController.brain;
+    if (brain && brain.memory.visibleNow.includes(target.id)) return true;
+    return Math.hypot(attacker.x - target.x, attacker.y - target.y) <= getVisionRadius(attacker);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Economy actions
+  // ---------------------------------------------------------------------------------------------
+
+  function issueAiHarvestCommands(layers: RenderLayers): boolean {
+    const home = getHome();
+    let changed = false;
+    for (const truck of options.entities) {
+      if (
+        truck.kind !== 'truck' ||
+        truck.faction !== 'enemy' ||
+        !truck.economy?.cargo ||
+        truck.economy.harvesting ||
+        truck.movement.state !== 'idle' ||
+        reservedIds.has(truck.id) ||
+        !isAlive(truck)
+      ) {
+        continue;
+      }
+      const field = chooseHarvestField(truck, home);
+      if (!field) {
+        options.aiController.lastAction = 'Rival harvest blocked: no safe metal field.';
+        continue;
+      }
+      const output = executeHarvestMetalCommand({
+        field,
+        selectedUnits: [truck],
+        findLandPath: options.findLandPath,
+        findTruckLandPath: options.findTruckLandPath,
+        getResourceInteractionPoint: (resourceField) => options.getResourceInteractionPoint(resourceField),
+        faction: 'enemy',
+        requireCommandable: false,
+      });
+      if (!output.result?.ok) {
+        // Unreachable for haulers (lakes, blockers): avoid it for a while instead of retrying every think.
+        unreachableFieldUntil.set(field.id, getBrain().clock + 90);
+        continue;
+      }
+      if (output.moveCommand) {
+        options.setLastMoveCommand(output.moveCommand);
+      }
+      options.aiController.harvestIssued = true;
+      options.aiController.lastAction = `Rival hauler sent to ${field.id}.`;
+      changed = true;
+    }
+    if (changed) options.drawDestinationOverlay(layers);
+    return changed;
+  }
+
+  function chooseHarvestField(truck: GameEntity, home: GameEntity | undefined): ResourceField | undefined {
+    const brain = getBrain();
+    const origin = home ?? truck;
+    let best: ResourceField | undefined;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const field of options.resourceFields) {
+      if (field.amount <= 0) continue;
+      if ((unreachableFieldUntil.get(field.id) ?? -1) > brain.clock) continue;
+      const distance = Math.hypot(field.x - origin.x, field.y - origin.y);
+      if (distance > 2600) continue;
+      let assigned = 0;
+      for (const other of options.entities) {
+        if (other.faction === 'enemy' && other.kind === 'truck' && other.economy?.harvesting?.fieldId === field.id) assigned += 1;
+      }
+      // Remembered player military near the field makes it dangerous.
+      let danger = 0;
+      for (const sighting of brain.memory.sightings) {
+        if (sighting.isBuilding && sighting.kind !== 'guardTower') continue;
+        if (getSightingCombatValue(sighting) <= 0.5) continue;
+        if (brain.clock - sighting.lastSeenAt > 30 && !sighting.isBuilding) continue;
+        if (Math.hypot(sighting.x - field.x, sighting.y - field.y) < 520) danger += 1;
+      }
+      // Fields west of the cannery send haulers through the barracks/rally lane, where trucks would crush our own infantry.
+      const lanePenalty = home && field.x < home.x - 300 ? 1600 : 0;
+      const score = distance + assigned * 380 + danger * 2000 + lanePenalty;
+      if (score < bestScore) {
+        bestScore = score;
+        best = field;
+      }
+    }
+    return best;
   }
 
   function queueAiProduction(product: ProductionKind, layers: RenderLayers): boolean {
@@ -159,54 +367,53 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     options.aiController.lastAction = `Rival queued ${productionCatalog[product].label}.`;
     options.aiController.lastProductionEvent = { kind: 'queued', product, stockpile: options.aiEconomyState.metal };
     options.renderBuildings(layers);
-    options.publishDebugState(layers);
     return true;
   }
 
   function assignAiFactoryCrew(layers: RenderLayers): boolean {
-    const factory = options.entities.find(
-      (entity) => entity.kind === 'enemyFactory' && entity.faction === 'enemy' && options.getDamageState(entity) !== 'destroyed' && entity.economy?.reelWorkshop,
-    );
-    if (!factory) {
+    const factory = getHome();
+    if (!factory?.economy?.reelWorkshop) {
       return false;
     }
-
-    const assignedCount = options.entities.filter(
-      (entity) => entity.kind === 'worker' && entity.faction === 'enemy' && entity.economy?.factoryDuty?.factoryId === factory.id,
-    ).length;
-    if (assignedCount >= 2) {
-      return false;
-    }
-
-    const availableWorkers = options.entities.filter(
-      (entity) =>
-        entity.kind === 'worker' &&
-        entity.faction === 'enemy' &&
+    const personality = AI_PERSONALITIES[getAiPersonality(options.aiController)];
+    let crew = 0;
+    let free = 0;
+    let candidate: GameEntity | undefined;
+    for (const entity of options.entities) {
+      if (entity.kind !== 'worker' || entity.faction !== 'enemy' || !isAlive(entity)) continue;
+      if (entity.economy?.factoryDuty?.factoryId === factory.id) {
+        crew += 1;
+        continue;
+      }
+      free += 1;
+      if (
+        !candidate &&
         entity.movement.state === 'idle' &&
         !entity.renderable.hidden &&
-        !entity.economy?.factoryDuty &&
+        !entity.economy?.buildJob &&
         !entity.economy?.attack &&
-        options.getDamageState(entity) !== 'destroyed',
-    );
-    const worker = availableWorkers.length > 3 ? availableWorkers[0] : undefined;
-    if (!worker) {
+        !reservedIds.has(entity.id)
+      ) {
+        candidate = entity;
+      }
+    }
+    if (crew >= personality.factoryCrew || free <= 2 || !candidate) {
       return false;
     }
-
-    worker.path = [];
-    worker.moveTarget = undefined;
-    worker.movement.state = 'idle';
-    worker.commandable = false;
-    worker.renderable = { ...worker.renderable, hidden: true };
-    worker.economy = { ...worker.economy, factoryDuty: { factoryId: factory.id, phase: 'producing' } };
+    candidate.path = [];
+    candidate.moveTarget = undefined;
+    candidate.movement.state = 'idle';
+    candidate.commandable = false;
+    candidate.renderable = { ...candidate.renderable, hidden: true };
+    candidate.economy = { ...candidate.economy, factoryDuty: { factoryId: factory.id, phase: 'producing' } };
     options.aiController.lastAction = 'Rival assigned a worker to auto-sell reel production.';
     options.renderUnits(layers);
     return true;
   }
 
   function findAiBuilder(): GameEntity | undefined {
-    return options.entities.find(
-      (entity) =>
+    for (const entity of options.entities) {
+      if (
         entity.kind === 'worker' &&
         entity.faction === 'enemy' &&
         entity.movement.state === 'idle' &&
@@ -214,12 +421,17 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
         !entity.economy?.buildJob &&
         !entity.economy?.factoryDuty &&
         !entity.economy?.attack &&
-        options.getDamageState(entity) !== 'destroyed',
-    );
+        !reservedIds.has(entity.id) &&
+        isAlive(entity)
+      ) {
+        return entity;
+      }
+    }
+    return undefined;
   }
 
   function buildAiStructure(input: {
-    building: 'dock' | 'barracks';
+    building: 'dock' | 'barracks' | 'guardTower';
     id: string;
     x: number;
     y: number;
@@ -227,14 +439,13 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     onIdConsumed: () => void;
     layers: RenderLayers;
   }): boolean {
-    const existing = options.entities.some(
-      (entity) =>
-        entity.faction === 'enemy' &&
-        entity.kind === input.building &&
-        options.getDamageState(entity) !== 'destroyed',
-    );
-    if (existing) {
-      return false;
+    if (input.building !== 'guardTower') {
+      const existing = options.entities.some(
+        (entity) => entity.faction === 'enemy' && entity.kind === input.building && options.getDamageState(entity) !== 'destroyed',
+      );
+      if (existing) {
+        return false;
+      }
     }
 
     const definition = buildingCatalog[input.building];
@@ -256,8 +467,21 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     }
 
     options.aiEconomyState.metal -= definition.cost;
-    builder.path = route.path;
-    builder.moveTarget = route.path[0];
+    assignBuilder(builder, site, route.path);
+    options.entities.push(site);
+    entityById.set(site.id, site);
+    input.onIdConsumed();
+    input.onStarted();
+    options.aiController.lastAction = `Rival started ${definition.label.toLowerCase()} with ${builder.name}. Metal: ${options.aiEconomyState.metal}.`;
+    options.renderBuildings(input.layers);
+    options.renderUnits(input.layers);
+    options.drawDestinationOverlay(input.layers);
+    return true;
+  }
+
+  function assignBuilder(builder: GameEntity, site: GameEntity, path: PathPoint[]): void {
+    builder.path = path;
+    builder.moveTarget = path[0];
     builder.movement.state = 'moving';
     builder.economy = {
       ...builder.economy,
@@ -267,22 +491,13 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
       attack: undefined,
       buildJob: { siteId: site.id, phase: 'to-site' },
     };
-    options.entities.push(site);
-    input.onIdConsumed();
-    input.onStarted();
-    options.aiController.lastAction = `Rival started ${definition.label.toLowerCase()} with ${builder.name}. Metal: ${options.aiEconomyState.metal}.`;
-    options.renderBuildings(input.layers);
-    options.renderUnits(input.layers);
-    options.drawDestinationOverlay(input.layers);
-    options.publishDebugState(input.layers);
-    return true;
+    progressTrack.delete(builder.id);
   }
 
   function findReachableConstructionRoute(builder: GameEntity, site: GameEntity): { workPoint: PathPoint; path: PathPoint[] } | null {
     const workPoints = options.getConstructionWorkPoints?.(site) ?? [options.getConstructionWorkPoint(site)];
     for (const workPoint of workPoints) {
-      const path = options.findEntityLandPath?.(builder, { x: builder.x, y: builder.y }, workPoint)
-        ?? options.findLandPath({ x: builder.x, y: builder.y }, workPoint);
+      const path = findPathFor(builder, workPoint);
       if (path.length > 0) {
         return { workPoint, path };
       }
@@ -295,7 +510,6 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     if (!dockPoint) {
       return false;
     }
-
     const nextEnemyDockId = options.getNextEnemyDockId();
     return buildAiStructure({
       building: 'dock',
@@ -311,11 +525,10 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
   }
 
   function buildAiBarracks(layers: RenderLayers): boolean {
-    const factory = options.entities.find((entity) => entity.kind === 'enemyFactory' && entity.faction === 'enemy');
-    if (!factory || options.getDamageState(factory) === 'destroyed') {
+    const factory = getHome();
+    if (!factory) {
       return false;
     }
-
     const nextEnemyBarracksId = options.getNextEnemyBarracksId();
     return buildAiStructure({
       building: 'barracks',
@@ -328,7 +541,49 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     });
   }
 
+  function buildAiGuardTower(layers: RenderLayers): boolean {
+    const factory = getHome();
+    if (!factory) {
+      return false;
+    }
+    // Towers face the player side (west) of the base and cover the harbor.
+    const candidates: PathPoint[] = [
+      { x: factory.x - 430, y: factory.y - 60 },
+      { x: factory.x - 450, y: factory.y + 170 },
+      { x: factory.x - 245, y: factory.y + 5 },
+      { x: factory.x - 120, y: factory.y - 230 },
+      { x: factory.x + 60, y: factory.y + 260 },
+      { x: factory.x - 600, y: factory.y + 40 },
+    ];
+    const towerCountNear = (point: PathPoint) =>
+      options.entities.filter((entity) => entity.faction === 'enemy' && entity.kind === 'guardTower' && Math.hypot(entity.x - point.x, entity.y - point.y) < 160).length;
+    const spot = candidates.find((point) => towerCountNear(point) === 0 && options.validateBuildingPlacement('guardTower', point.x, point.y));
+    if (!spot) {
+      return false;
+    }
+    const nextTowerId = options.getNextEnemyGuardTowerId();
+    return buildAiStructure({
+      building: 'guardTower',
+      id: nextTowerId === 1 ? 'enemy-guard-tower' : `enemy-guard-tower-${nextTowerId}`,
+      x: spot.x,
+      y: spot.y,
+      onStarted: () => {},
+      onIdConsumed: () => options.setNextEnemyGuardTowerId(nextTowerId + 1),
+      layers,
+    });
+  }
+
   function updateAiProduction(deltaSeconds: number, layers: RenderLayers): boolean {
+    let hasQueue = false;
+    for (const entity of options.entities) {
+      if (entity.faction === 'enemy' && entity.economy?.productionQueue && entity.economy.productionQueue.length > 0) {
+        hasQueue = true;
+        break;
+      }
+    }
+    if (!hasQueue) {
+      return false;
+    }
     const result = updateProductionQueues({
       producers: options.entities.filter((entity) => entity.faction === 'enemy' && entity.economy?.productionQueue),
       deltaSeconds,
@@ -346,44 +601,55 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
         stockpile: spawned.stockpile,
       };
     }
-
-    const enemyFactory = options.entities.find((entity) => isUsableAiProducer(entity, 'enemyFactory'));
-    const enemyBarracks = options.entities.find((entity) => isUsableAiProducer(entity, 'barracks'));
-    const enemyDock = options.entities.find((entity) => isUsableAiProducer(entity, 'dock'));
-    options.aiController.productionQueued = Boolean(enemyFactory?.economy?.productionQueue?.length);
-    options.aiController.barracksProductionQueued = Boolean(enemyBarracks?.economy?.productionQueue?.length);
-    options.aiController.boatProductionQueued = Boolean(enemyDock?.economy?.productionQueue?.length);
-
-    if (result.changed) {
+    if (result.spawned.length > 0) {
       options.renderUnits(layers);
       options.renderBuildings(layers);
       options.drawSelectionOverlay(layers);
-      options.publishDebugState(layers);
     }
+    return result.spawned.length > 0;
+  }
 
-    return result.changed;
+  function syncProducerFlags(): void {
+    let factoryQueue = false;
+    let barracksQueue = false;
+    let dockQueue = false;
+    for (const entity of options.entities) {
+      if (entity.faction !== 'enemy' || !entity.economy?.productionQueue?.length) continue;
+      if (entity.kind === 'enemyFactory') factoryQueue = true;
+      if (entity.kind === 'barracks') barracksQueue = true;
+      if (entity.kind === 'dock') dockQueue = true;
+    }
+    options.aiController.productionQueued = factoryQueue;
+    options.aiController.barracksProductionQueued = barracksQueue;
+    options.aiController.boatProductionQueued = dockQueue;
   }
 
   function updateAiFishing(layers: RenderLayers): boolean {
-    const dock = options.entities.find(
-      (entity) => entity.kind === 'dock' && entity.faction === 'enemy' && options.getDamageState(entity) !== 'destroyed',
-    );
-    if (!dock || options.getDamageState(dock) === 'destroyed') {
+    let dock: GameEntity | undefined;
+    for (const entity of options.entities) {
+      if (entity.kind === 'dock' && entity.faction === 'enemy' && isAlive(entity) && (!entity.economy?.construction || entity.economy.construction.complete)) {
+        dock = entity;
+        break;
+      }
+    }
+    if (!dock) {
       return false;
     }
 
-    const boats = options.entities.filter(
-      (entity) =>
-        entity.kind === 'boat' &&
-        entity.faction === 'enemy' &&
-        entity.id.startsWith('enemy-boat-') &&
-        entity.movement.speed > 0 &&
-        entity.movement.state === 'idle' &&
-        options.getDamageState(entity) !== 'destroyed' &&
-        Boolean(entity.economy?.cargo),
-    );
-
-    for (const boat of boats) {
+    let changed = false;
+    for (const boat of options.entities) {
+      if (
+        boat.kind !== 'boat' ||
+        boat.faction !== 'enemy' ||
+        boat.economy?.combatRole === 'attack' ||
+        boat.movement.speed <= 0 ||
+        boat.movement.state !== 'idle' ||
+        !isAlive(boat) ||
+        reservedIds.has(boat.id) ||
+        boat.economy?.dockRepair
+      ) {
+        continue;
+      }
       const cargo = boat.economy?.cargo;
       if (!cargo) {
         continue;
@@ -400,11 +666,11 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
         boat.movement.state = 'moving';
         boat.economy = { ...boat.economy, fishing: undefined, unloadingFish: { targetId: dock.id, phase: 'to-dock' } };
         options.aiController.lastAction = 'Rival fishing boat returning to dock.';
-        options.drawDestinationOverlay(layers);
-        return true;
+        changed = true;
+        continue;
       }
 
-      if (cargo.amount === 0 && !boat.economy?.fishing) {
+      if (!boat.economy?.fishing && !boat.economy?.unloadingFish) {
         const zone = pickAiFishingZone(dock);
         if (!zone) {
           continue;
@@ -420,40 +686,34 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
         boat.economy = { ...boat.economy, unloadingFish: undefined, fishing: { zoneId: zone.id, phase: 'to-zone' } };
         options.aiController.fishingIssued = true;
         options.aiController.lastAction = 'Rival fishing command queued.';
-        options.drawDestinationOverlay(layers);
-        return true;
+        changed = true;
       }
     }
-
-    return false;
+    if (changed) options.drawDestinationOverlay(layers);
+    return changed;
   }
 
-  function pickAiFishingZone(origin?: { x: number; y: number }): FishingZoneState | undefined {
-    const viableZones = options.fishingZoneStates.filter((zone) => zone.amount > 0 && zone.depletedCooldownSeconds <= 0);
-    if (viableZones.length === 0) {
-      return options.fishingZoneStates[0];
+  function pickAiFishingZone(origin: { x: number; y: number }): FishingZoneState | undefined {
+    const brain = getBrain();
+    const personality = AI_PERSONALITIES[brain.personality];
+    let best: FishingZoneState | undefined;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (const zone of options.fishingZoneStates) {
+      if (zone.amount <= 0 || zone.depletedCooldownSeconds > 0) continue;
+      if (zone.x < origin.x - 1400) continue;
+      const distance = Math.hypot(zone.x - origin.x, zone.y - origin.y);
+      let danger = 0;
+      for (const sighting of brain.memory.sightings) {
+        if (sighting.kind === 'boat' && sighting.combatRole === 'attack' && brain.clock - sighting.lastSeenAt < 40 && Math.hypot(sighting.x - zone.x, sighting.y - zone.y) < 500) danger += 1;
+      }
+      const tierBonus = personality.navalRaids && zone.tier === 'contested' ? 60 : personality.style === 'assault' && zone.tier === 'safe' ? 40 : 0;
+      const score = zone.cashPerFish * 120 + Math.min(zone.amount, 180) - distance / 8 + tierBonus - danger * 400;
+      if (score > bestScore) {
+        bestScore = score;
+        best = zone;
+      }
     }
-
-    const nearbyZones = origin
-      ? viableZones.filter((zone) => zone.x >= origin.x - 1400)
-      : viableZones;
-    const homeWaters = nearbyZones.length > 0 ? nearbyZones : viableZones;
-    const rankZones = (zones: FishingZoneState[]): FishingZoneState[] =>
-      [...zones].sort((a, b) => {
-        const distanceA = origin ? Math.hypot(a.x - origin.x, a.y - origin.y) : 0;
-        const distanceB = origin ? Math.hypot(b.x - origin.x, b.y - origin.y) : 0;
-        const scoreA = a.cashPerFish * 120 + Math.min(a.amount, 180) - distanceA / 8;
-        const scoreB = b.cashPerFish * 120 + Math.min(b.amount, 180) - distanceB / 8;
-        return scoreB - scoreA;
-      });
-
-    if (options.aiController.strategy === 'economicBoom') {
-      return rankZones(homeWaters)[0];
-    }
-    if (options.aiController.strategy === 'harborPressure') {
-      return rankZones(homeWaters.filter((zone) => zone.tier === 'contested'))[0] ?? rankZones(homeWaters)[0];
-    }
-    return rankZones(homeWaters.filter((zone) => zone.tier === 'safe'))[0] ?? rankZones(homeWaters)[0];
+    return best ?? options.fishingZoneStates[0];
   }
 
   function isUsableAiProducer(entity: GameEntity, kind: GameEntity['kind']): boolean {
@@ -466,23 +726,16 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
   }
 
   function updateAiBoatRepair(): boolean {
-    const dock = options.entities.find(
-      (entity) =>
-        entity.kind === 'dock' &&
-        entity.faction === 'enemy' &&
-        options.getDamageState(entity) !== 'destroyed' &&
-        (!entity.economy?.construction || entity.economy.construction.complete),
-    );
+    const dock = options.entities.find((entity) => isUsableAiProducer(entity, 'dock'));
     if (!dock) {
       return false;
     }
-
     const boat = options.entities.find(
       (entity) =>
         entity.kind === 'boat' &&
         entity.faction === 'enemy' &&
         (entity.economy?.health ?? 0) > 0 &&
-        (entity.economy?.health ?? 0) < options.getMaxHealth(entity) &&
+        (entity.economy?.health ?? 0) < options.getMaxHealth(entity) * 0.75 &&
         !entity.economy?.dockRepair &&
         !entity.economy?.fishing &&
         !entity.economy?.unloadingFish &&
@@ -492,7 +745,6 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     if (!boat) {
       return false;
     }
-
     const target = options.getDockUnloadPoint(dock);
     const path = options.findWaterPath({ x: boat.x, y: boat.y }, target);
     if (path.length === 0) {
@@ -512,196 +764,544 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     return true;
   }
 
-  function issueAiRaidCommand(layers: RenderLayers): boolean {
-    const leadAttacker = chooseAiRaidAttacker(options.entities, options.getDamageState);
-    if (!leadAttacker) {
-      return false;
-    }
+  // ---------------------------------------------------------------------------------------------
+  // Perception, threat, tactic
+  // ---------------------------------------------------------------------------------------------
 
-    const raidPlan = options.findReachableRaidPlan(leadAttacker, options.getAiRaidTargetPriority());
-    if (!raidPlan) {
-      options.aiController.lastAction = 'Rival raid blocked: no land route to exposed economy.';
-      return false;
+  function updateHomeThreat(brain: AiBrainState, now: number): void {
+    const threat = brain.threat;
+    threat.ids.length = 0;
+    threat.strength = 0;
+    let sumX = 0;
+    let sumY = 0;
+    for (const sighting of brain.memory.sightings) {
+      const visible = brain.memory.visibleNow.includes(sighting.id);
+      const freshReveal = sighting.source === 'damage' && now - sighting.lastSeenAt < 4;
+      if (!visible && !freshReveal) continue;
+      if (sighting.isBuilding && sighting.kind !== 'guardTower') continue;
+      if (!isNearRivalAssets(sighting.x, sighting.y)) continue;
+      const value = sighting.kind === 'worker' || sighting.kind === 'truck' ? 0.15 : Math.max(0.3, getSightingCombatValue(sighting));
+      threat.strength += value;
+      threat.ids.push(sighting.id);
+      sumX += sighting.x;
+      sumY += sighting.y;
     }
-
-    const squad = options.getAiRaidSquad(leadAttacker, raidPlan.target);
-    if (squad.length === 0) {
-      return false;
+    if (threat.ids.length > 0) {
+      threat.x = sumX / threat.ids.length;
+      threat.y = sumY / threat.ids.length;
+      threat.lastSeenAt = now;
     }
-
-    const { target } = raidPlan;
-    let assignedAttackers = 0;
-    for (const [index, attacker] of squad.entries()) {
-      const targetPoint = options.getStaggeredRaidApproachPoint(target, index, squad.length);
-      const candidateTargets = [targetPoint, raidPlan.targetPoint].filter(
-        (point, pointIndex, points) => points.findIndex((candidate) => candidate.x === point.x && candidate.y === point.y) === pointIndex,
-      );
-      const route = candidateTargets
-        .map((point) => ({
-          point,
-          path: options.findEntityLandPath?.(attacker, { x: attacker.x, y: attacker.y }, point)
-            ?? options.findLandPath({ x: attacker.x, y: attacker.y }, point),
-        }))
-        .find((candidate) => candidate.path.length > 0);
-      if (!route) {
-        continue;
-      }
-      const path = route.path;
-      if (path.length === 0) {
-        continue;
-      }
-      attacker.path = path;
-      attacker.moveTarget = path[0];
-      attacker.movement.state = 'moving';
-      attacker.economy = {
-        ...attacker.economy,
-        attack: {
-          targetId: target.id,
-          phase: 'to-target',
-          damagePerSecond: attacker.kind === 'guard'
-            ? FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidGuardDamagePerSecond
-            : FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidWorkerDamagePerSecond,
-          range: attacker.kind === 'guard'
-            ? FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidGuardAttackRange
-            : FIRST_SKIRMISH_COMBAT_PRESSURE.enemyRaidWorkerAttackRange,
-        },
-      };
-      assignedAttackers += 1;
-    }
-    if (assignedAttackers === 0) {
-      options.aiController.lastAction = 'Rival raid blocked: no attackers could reach the target.';
-      return false;
-    }
-    options.aiController.raidIssued = true;
-    options.aiController.raidCount += 1;
-    options.aiController.lastAction = `Rival ${options.describeAiRaidTactic()} raid warning: ${target.name} is exposed.`;
-    options.aiController.lastRaidEvent = {
-      kind: 'queued',
-      attackerId: squad[0].id,
-      targetId: target.id,
-      targetHealth: target.economy?.health,
-    };
-    options.issuePlayerAssetWarning(target, 'incoming');
-    options.drawDestinationOverlay(layers);
-    return true;
   }
 
-  function updateAiScouting(deltaSeconds: number, layers: RenderLayers): boolean {
-    const intel = getAiIntel();
-    updateScoutTimers(intel, deltaSeconds);
+  /** Home = rival structures, plus haulers/workers working within the home area (not scouts far away). */
+  function isNearRivalAssets(x: number, y: number): boolean {
+    const radius = AI_MEMORY_TUNING.homeThreatRadius;
+    const home = getHome();
+    for (const entity of options.entities) {
+      if (entity.faction !== 'enemy' || !isAlive(entity) || entity.renderable.hidden) continue;
+      if (entity.renderable.layer === 'buildings') {
+        if (Math.hypot(entity.x - x, entity.y - y) <= radius) return true;
+        continue;
+      }
+      if (entity.kind !== 'worker' && entity.kind !== 'truck') continue;
+      if (reservedIds.has(entity.id) || !home || Math.hypot(entity.x - home.x, entity.y - home.y) > 1700) continue;
+      if (Math.hypot(entity.x - x, entity.y - y) <= 420) return true;
+    }
+    return false;
+  }
 
-    let changed = false;
-    const activeScout = intel.scout.scoutId
-      ? options.entities.find((entity) => entity.id === intel.scout.scoutId && options.getDamageState(entity) !== 'destroyed')
-      : undefined;
-    if (activeScout) {
-      const scan = scanPlayerIntel({
-        entities: options.entities,
-        scout: activeScout,
-        deltaSeconds,
-        getDamageState: options.getDamageState,
-      });
-      if (scan) {
-        mergeObservedPlayerState(intel.observed, scan.observed);
-        if (scan.report && intel.scout.reportCooldownSeconds <= 0) {
-          intel.lastScoutReport = scan.report;
-          intel.scout.reportCooldownSeconds = 18;
-          options.announceAiScout(scan.report, { x: activeScout.x, y: activeScout.y });
-          changed = true;
-        }
-        if (updateAdaptiveTactic({ intel, openingStrategy: options.aiController.strategy })) {
-          options.aiController.activeTactic = intel.tactic;
-          options.aiController.lastAction = `Rival switched to ${getAiTacticLabel(intel.tactic)} after scouting: ${intel.tacticReason}.`;
-          changed = true;
+  function shouldRivalDefend(attackedAssetId: string): boolean {
+    const asset = entityById.get(attackedAssetId) ?? options.entities.find((entity) => entity.id === attackedAssetId);
+    if (!asset) return false;
+    if (reservedIds.has(asset.id)) return false;
+    if (asset.renderable.layer === 'buildings') return true;
+    const home = getHome();
+    return Boolean(home) && Math.hypot(asset.x - (home?.x ?? 0), asset.y - (home?.y ?? 0)) <= 1700;
+  }
+
+  function buildDemand(brain: AiBrainState, counts: ReturnType<typeof countAiOwnAssets>): Partial<Record<AiBuildItem, number>> {
+    // Insertion order is priority order for the planner.
+    const demand: Partial<Record<AiBuildItem, number>> = {};
+    const intel = getIntel();
+    const personality = AI_PERSONALITIES[brain.personality];
+    const difficulty = AI_DIFFICULTY[getDifficultyId()];
+    // Once the base has been raided, every personality saves up for at least one tower (turtles for two).
+    const recentlyRaided = brain.clock - brain.threat.lastSeenAt < 180;
+    if (recentlyRaided && counts.guardTower === 0) {
+      demand.guardTower = 1;
+    } else if (brain.threat.strength >= 1 && (personality.id === 'turtleSiege' || brain.threat.strength >= 3)) {
+      demand.guardTower = Math.min(3, counts.guardTower + 1);
+    }
+    if (brain.threat.strength >= 1) {
+      demand.guard = Math.min(difficulty.armyCap, counts.guard + 2);
+    }
+    const observed = intel.observed;
+    if (observed.attackBoats >= 2 && counts.dock > 0) {
+      demand.attackBoat = Math.min(5, observed.attackBoats);
+    }
+    if ((observed.militaryScore ?? 0) > brain.lastArmyStrength + 2) {
+      demand.guard = Math.min(difficulty.armyCap, Math.max(demand.guard ?? 0, Math.ceil(observed.militaryScore ?? 0) + 1));
+    }
+    return demand;
+  }
+
+  function getRally(home: GameEntity): PathPoint {
+    if (rallyPoint) return rallyPoint;
+    const personality = AI_PERSONALITIES[getBrain().personality];
+    const preferred = personality.forwardRally
+      ? { x: home.x - FORWARD_RALLY_DISTANCE, y: home.y + 180 }
+      : { x: home.x - 420, y: home.y - 130 };
+    for (const radius of [0, 120, 240, 360]) {
+      for (let step = 0; step < 8; step += 1) {
+        const angle = (step / 8) * Math.PI * 2;
+        const x = preferred.x + Math.cos(angle) * radius;
+        const y = preferred.y + Math.sin(angle) * radius;
+        if (options.isValidLandPoint(x, y) && options.findLandPath({ x: home.x - 200, y: home.y + 140 }, { x, y }).length > 0) {
+          rallyPoint = { x, y };
+          return rallyPoint;
         }
       }
+    }
+    rallyPoint = { x: home.x - 420, y: home.y - 130 };
+    return rallyPoint;
+  }
 
-      const target = intel.scout.targetId ? options.entities.find((entity) => entity.id === intel.scout.targetId) : undefined;
-      const reachedTarget = target ? Math.hypot(activeScout.x - target.x, activeScout.y - target.y) <= 260 : activeScout.movement.state === 'idle';
-      if (reachedTarget || activeScout.economy?.attack || activeScout.economy?.buildJob || activeScout.economy?.harvesting || activeScout.economy?.factoryDuty) {
-        if (reachedTarget) {
-          const home = options.entities.find((entity) => entity.kind === 'enemyFactory' && entity.faction === 'enemy' && options.getDamageState(entity) !== 'destroyed');
-          if (home) {
-            const returnPoint = { x: home.x - 140, y: home.y + 120 };
-            const returnPath = options.findEntityLandPath?.(activeScout, { x: activeScout.x, y: activeScout.y }, returnPoint)
-              ?? options.findLandPath({ x: activeScout.x, y: activeScout.y }, returnPoint);
-            if (returnPath.length > 0) {
-              activeScout.path = returnPath;
-              activeScout.moveTarget = returnPath[0];
-              activeScout.movement.state = 'moving';
-            }
-          }
-        }
-        intel.scout.scoutId = undefined;
-        intel.scout.targetId = undefined;
-        intel.scout.cooldownSeconds = Math.max(intel.scout.cooldownSeconds, 22);
+  /** Idle workers wait north of the cannery, away from hauler lanes (trucks crush anyone they drive over). */
+  function getWorkerParking(home: GameEntity): PathPoint {
+    if (workerParking) return workerParking;
+    const candidates = [
+      { x: home.x - 60, y: home.y - 200 },
+      { x: home.x + 120, y: home.y - 190 },
+      { x: home.x - 240, y: home.y - 170 },
+      { x: home.x + 230, y: home.y - 60 },
+    ];
+    workerParking = candidates.find((point) => options.isValidLandPoint(point.x, point.y)) ?? { x: home.x - 60, y: home.y - 200 };
+    return workerParking;
+  }
+
+  function parkIdleWorkers(): boolean {
+    const home = getHome();
+    if (!home) return false;
+    const parking = getWorkerParking(home);
+    let changed = false;
+    for (const worker of options.entities) {
+      if (
+        worker.kind !== 'worker' ||
+        worker.faction !== 'enemy' ||
+        worker.movement.state !== 'idle' ||
+        worker.renderable.hidden ||
+        worker.economy?.buildJob ||
+        worker.economy?.factoryDuty ||
+        worker.economy?.attack ||
+        worker.economy?.repair ||
+        reservedIds.has(worker.id) ||
+        !isAlive(worker)
+      ) {
+        continue;
+      }
+      if (Math.hypot(worker.x - parking.x, worker.y - parking.y) <= 110) continue;
+      if (Math.hypot(worker.x - home.x, worker.y - home.y) > 1400) continue;
+      changed = moveLand(worker, spreadAround(parking, worker.id, 55)) || changed;
+    }
+    return changed;
+  }
+
+  function spreadAround(center: PathPoint, id: string, radius: number): PathPoint {
+    let hash = 0;
+    for (let index = 0; index < id.length; index += 1) hash = (hash * 31 + id.charCodeAt(index)) | 0;
+    const angle = ((hash >>> 0) % 360) * (Math.PI / 180);
+    return { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius };
+  }
+
+  function getPointsOfInterest(): AiPointOfInterest[] {
+    if (pointsOfInterest) return pointsOfInterest;
+    const pois: AiPointOfInterest[] = [];
+    const home = getHome();
+    const homeX = home?.x ?? 6000;
+    for (const area of options.mapData.baseAreas) {
+      if (area.owner === 'enemy') continue;
+      pois.push({
+        x: area.x + area.width / 2,
+        y: area.y + area.height / 2,
+        label: area.id,
+        domain: 'land',
+        priority: area.owner === 'player' ? 5 : 1.4,
+      });
+    }
+    for (const field of options.resourceFields) {
+      const distanceFromHome = Math.abs(field.x - homeX);
+      if (distanceFromHome < 900) continue;
+      pois.push({ x: field.x, y: field.y, label: field.id, domain: 'land', priority: field.x < homeX / 2 ? 3 : 1 });
+    }
+    for (const dockPoint of options.mapData.dockPoints) {
+      if (Math.abs(dockPoint.x - homeX) < 900) continue;
+      const water = waterPointNear({ x: dockPoint.x, y: dockPoint.y - 90 });
+      if (water) pois.push({ x: water.x, y: water.y, label: `${dockPoint.id} waters`, domain: 'water', priority: 4 });
+    }
+    for (const zone of options.fishingZoneStates) {
+      if (Math.abs(zone.x - homeX) < 700) continue;
+      const point = waterPointNear(zone);
+      if (point) pois.push({ x: point.x, y: point.y, label: zone.label ?? zone.id, domain: 'water', priority: zone.x < homeX / 2 ? 2 : 1 });
+    }
+    pointsOfInterest = pois;
+    return pois;
+  }
+
+  function chooseLandScout(brain: AiBrainState): GameEntity | undefined {
+    const personality = AI_PERSONALITIES[brain.personality];
+    let workers = 0;
+    let militaryCount = 0;
+    let worker: GameEntity | undefined;
+    let military: GameEntity | undefined;
+    for (const entity of options.entities) {
+      if (entity.faction !== 'enemy' || !isAlive(entity) || entity.renderable.hidden) continue;
+      if (entity.kind === 'worker' && !entity.economy?.factoryDuty) {
+        workers += 1;
+        if (!worker && entity.movement.state === 'idle' && !entity.economy?.buildJob && !entity.economy?.attack) worker = entity;
+      }
+      if (isAiLandMilitary(entity)) militaryCount += 1;
+      if (
+        !military &&
+        isAiLandMilitary(entity) &&
+        !brain.army.squadIds.includes(entity.id) &&
+        entity.movement.state === 'idle' &&
+        !entity.economy?.attack
+      ) {
+        military = entity;
+      }
+    }
+    const spareWorker = workers >= 3 ? worker : undefined;
+    const spareMilitary = militaryCount >= 3 ? military : undefined;
+    return personality.scoutWith === 'worker' ? spareWorker ?? spareMilitary : spareMilitary ?? spareWorker;
+  }
+
+  function chooseNavalScout(brain: AiBrainState): GameEntity | undefined {
+    if (brain.army.fleetMode !== 'patrol') return undefined;
+    for (const entity of options.entities) {
+      if (entity.faction === 'enemy' && entity.kind === 'boat' && entity.economy?.combatRole === 'attack' && isAlive(entity) && !entity.economy?.attack && !entity.economy?.dockRepair) {
+        return entity;
+      }
+    }
+    return undefined;
+  }
+
+  function updateScouting(brain: AiBrainState, layers: RenderLayers): boolean {
+    const home = getHome();
+    if (!home) return false;
+    const pois = getPointsOfInterest();
+    const difficulty = AI_DIFFICULTY[getDifficultyId()];
+    const intel = getIntel();
+    const urgent = brain.memory.sightings.length === 0 || intel.tactic === 'scouting';
+    const homePoint = { x: home.x - 220, y: home.y + 150 };
+    let changed = false;
+    const landEvent = updateAiScoutRun({
+      run: brain.landScout,
+      pois,
+      poiScoutedAt: brain.poiScoutedAt,
+      now: brain.clock,
+      entityById,
+      getDamageState: options.getDamageState,
+      chooseUnit: () => chooseLandScout(brain),
+      move: (unit, point) => {
+        if (!moveLand(unit, point)) return false;
+        unit.economy = { ...unit.economy, attack: undefined, shoreFishing: undefined };
+        return true;
+      },
+      home: homePoint,
+      interval: difficulty.scoutIntervalSeconds,
+      urgent,
+      maxLegs: 3,
+    });
+    if (landEvent) {
+      changed = true;
+      if (landEvent === 'sent') brain.stats.scoutsSent += 1;
+      if (landEvent === 'lost') brain.stats.scoutsLost += 1;
+      brain.lastDecision = `Land scout ${landEvent}.`;
+      if (landEvent === 'sent') options.aiController.lastAction = 'Rival scout heading out to look for your base.';
+    }
+    const homeWater = waterPointNear({ x: home.x + 100, y: home.y - 420 }) ?? waterPointNear(options.mapDockPoint() ?? home);
+    if (homeWater) {
+      const navalEvent = updateAiScoutRun({
+        run: brain.navalScout,
+        pois,
+        poiScoutedAt: brain.poiScoutedAt,
+        now: brain.clock,
+        entityById,
+        getDamageState: options.getDamageState,
+        chooseUnit: () => chooseNavalScout(brain),
+        move: (unit, point) => moveWater(unit, point),
+        home: homeWater,
+        interval: difficulty.scoutIntervalSeconds * 1.3,
+        urgent: false,
+        maxLegs: 2,
+      });
+      if (navalEvent) {
+        changed = true;
+        if (navalEvent === 'sent') brain.stats.scoutsSent += 1;
+        if (navalEvent === 'lost') brain.stats.scoutsLost += 1;
+      }
+    }
+    if (changed) options.drawDestinationOverlay(layers);
+    return changed;
+  }
+
+  function refreshReservedIds(brain: AiBrainState): void {
+    reservedIds.clear();
+    if (brain.landScout.unitId) reservedIds.add(brain.landScout.unitId);
+    if (brain.navalScout.unitId) reservedIds.add(brain.navalScout.unitId);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Watchdogs
+  // ---------------------------------------------------------------------------------------------
+
+  function updateStuckWatchdog(brain: AiBrainState, deltaSeconds: number): boolean {
+    let changed = false;
+    for (const entity of options.entities) {
+      if (entity.faction !== 'enemy' || entity.movement.speed <= 0 || entity.renderable.hidden) continue;
+      if (entity.movement.state !== 'moving' || !isAlive(entity)) {
+        progressTrack.delete(entity.id);
+        continue;
+      }
+      const track = progressTrack.get(entity.id);
+      if (!track) {
+        progressTrack.set(entity.id, { x: entity.x, y: entity.y, stuckSeconds: 0 });
+        continue;
+      }
+      const moved = Math.hypot(entity.x - track.x, entity.y - track.y);
+      track.x = entity.x;
+      track.y = entity.y;
+      track.stuckSeconds = moved < STUCK_EPSILON ? track.stuckSeconds + deltaSeconds : 0;
+      if (track.stuckSeconds < STUCK_SECONDS) continue;
+      // Recovery: drop the blocked route; the owning system (harvest, army, scout, builder) re-issues.
+      progressTrack.delete(entity.id);
+      entity.path = [];
+      entity.moveTarget = undefined;
+      entity.movement.state = 'idle';
+      if (entity.economy?.harvesting) entity.economy = { ...entity.economy, harvesting: undefined };
+      if (entity.economy?.attack) entity.economy = { ...entity.economy, attack: undefined };
+      if (entity.economy?.buildJob?.phase === 'to-site') entity.economy = { ...entity.economy, buildJob: undefined };
+      if (entity.economy?.fishing) entity.economy = { ...entity.economy, fishing: undefined };
+      brain.stats.watchdogRecoveries += 1;
+      brain.lastDecision = `Watchdog freed stuck ${entity.id}.`;
+      changed = true;
+    }
+    return changed;
+  }
+
+  function updateConstructionWatchdog(brain: AiBrainState): boolean {
+    scratchSiteBuilders.clear();
+    for (const entity of options.entities) {
+      if (entity.faction === 'enemy' && entity.kind === 'worker' && isAlive(entity) && entity.economy?.buildJob) {
+        scratchSiteBuilders.add(entity.economy.buildJob.siteId);
+      }
+    }
+    for (const site of options.entities) {
+      const construction = site.economy?.construction;
+      if (site.faction !== 'enemy' || !construction || construction.complete || !isAlive(site)) continue;
+      if (scratchSiteBuilders.has(site.id)) continue;
+      const builder = findAiBuilder();
+      if (!builder) return false;
+      const route = findReachableConstructionRoute(builder, site);
+      if (!route) continue;
+      assignBuilder(builder, site, route.path);
+      brain.stats.watchdogRecoveries += 1;
+      brain.lastDecision = `Watchdog reassigned ${builder.id} to orphaned ${site.id}.`;
+      return true;
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Think loop
+  // ---------------------------------------------------------------------------------------------
+
+  function think(deltaSeconds: number, layers: RenderLayers): boolean {
+    const controller = options.aiController;
+    controller.difficulty = getDifficultyId();
+    indexEntities();
+    const brain = getBrain();
+    const intel = getIntel();
+
+    if (controller.startDelaySeconds > 0) {
+      // Time until the first wave is allowed keeps counting down through the start delay.
+      controller.raidDelaySeconds = Math.max(0, brain.army.nextWaveAt - brain.clock) + controller.startDelaySeconds;
+      return tickAiCoordinator({
+        deltaSeconds,
+        state: controller,
+        entities: options.entities,
+        availableMetal: options.aiEconomyState.metal,
+        availableCash: options.aiEconomyState.cash,
+        getDamageState: options.getDamageState,
+        tryIssueHarvest: () => false,
+        queueProduction: () => false,
+        buildDock: () => false,
+        buildBarracks: () => false,
+        updateProduction: () => false,
+        updateFishing: () => false,
+        updateBoatRepair: () => false,
+        respondToThreat: () => false,
+        issueRaid: () => false,
+        updateRaid: () => false,
+      });
+    }
+
+    const now = brain.clock + deltaSeconds;
+    refreshReservedIds(brain);
+
+    // 1. Perception -> memory -> summary.
+    const perception = updateAiPerception({
+      entities: options.entities,
+      memory: brain.memory,
+      now,
+      getDamageState: options.getDamageState,
+      getMaxHealth: options.getMaxHealth,
+    });
+    intel.observed = summarizeAiMemory(brain.memory, now);
+    let changed = false;
+    if (perception.newSightings > 0 && now - lastScoutAnnounceAt > 18) {
+      const scout = brain.landScout.unitId ? entityById.get(brain.landScout.unitId) : undefined;
+      if (scout && brain.landScout.status === 'outbound') {
+        intel.lastScoutReport = describeObservedPlayer(intel.observed);
+        lastScoutAnnounceAt = now;
+        options.announceAiScout(intel.lastScoutReport, { x: scout.x, y: scout.y });
         changed = true;
       }
-      return changed;
     }
 
-    if (intel.scout.cooldownSeconds > 0 || options.aiController.startDelaySeconds > 0 || !options.aiController.openingComplete) {
-      return changed;
+    // 2. Home threat + tactic.
+    const hadThreat = brain.threat.strength > 0;
+    updateHomeThreat(brain, now);
+    intel.tacticCooldownSeconds = Math.max(0, intel.tacticCooldownSeconds - deltaSeconds);
+    const threatChanged = hadThreat !== brain.threat.strength > 0;
+    if (
+      updateAdaptiveTactic({
+        intel,
+        openingStrategy: controller.strategy,
+        force: threatChanged,
+        context: {
+          personality: AI_PERSONALITIES[brain.personality],
+          ownArmyStrength: brain.lastArmyStrength,
+          threatAtHome: brain.threat.strength,
+          secondsSinceRepelled: now - brain.army.defendClearedAt,
+          avoidBase: now < brain.army.avoidBaseUntil,
+          desiredWaveSize: brain.lastDesiredWave,
+        },
+      })
+    ) {
+      controller.activeTactic = intel.tactic;
+      controller.lastAction = `Rival switched to ${getAiTacticLabel(intel.tactic)}: ${intel.tacticReason}.`;
+      brain.lastDecision = controller.lastAction;
+      changed = true;
     }
+    controller.activeTactic = intel.tactic;
 
-    const scout = chooseScoutUnit(options.entities, options.getDamageState);
-    const target = chooseScoutTarget(options.entities, options.getDamageState);
-    if (!scout || !target) {
-      intel.scout.cooldownSeconds = 8;
-      return changed;
-    }
-
-    const scoutPoint = options.getStaggeredRaidApproachPoint(target, 0, 1);
-    const path = options.findEntityLandPath?.(scout, { x: scout.x, y: scout.y }, scoutPoint)
-      ?? options.findLandPath({ x: scout.x, y: scout.y }, scoutPoint);
-    if (path.length === 0) {
-      intel.scout.cooldownSeconds = 10;
-      return changed;
-    }
-
-    scout.path = path;
-    scout.moveTarget = path[0];
-    scout.movement.state = 'moving';
-    scout.economy = {
-      ...scout.economy,
-      attack: undefined,
-      shoreFishing: undefined,
-      factoryDuty: undefined,
-    };
-    intel.scout.scoutId = scout.id;
-    intel.scout.targetId = target.id;
-    intel.scout.cooldownSeconds = 34;
-    options.aiController.lastAction = `Rival scout probing toward ${target.name}.`;
-    options.renderUnits(layers);
-    options.drawDestinationOverlay(layers);
-    return true;
-  }
-
-  function updateAiRival(deltaSeconds: number, layers: RenderLayers): boolean {
-    refreshStaleEconomyOrders();
-    const scoutChanged = updateAiScouting(deltaSeconds, layers);
-    const crewChanged = assignAiFactoryCrew(layers);
-    let changed = tickAiCoordinator({
+    // 3. Economy + territory defense (coordinator advances brain.clock).
+    const counts = countAiOwnAssets(options.entities, options.getDamageState);
+    changed = tickAiCoordinator({
       deltaSeconds,
-      state: options.aiController,
+      state: controller,
       entities: options.entities,
       availableMetal: options.aiEconomyState.metal,
       availableCash: options.aiEconomyState.cash,
       getDamageState: options.getDamageState,
-      tryIssueHarvest: () => issueAiHarvestCommand(layers),
+      tryIssueHarvest: () => issueAiHarvestCommands(layers),
       queueProduction: (product) => queueAiProduction(product, layers),
       buildDock: () => buildAiDock(layers),
       buildBarracks: () => buildAiBarracks(layers),
-      updateProduction: () => updateAiProduction(deltaSeconds, layers),
+      buildGuardTower: () => buildAiGuardTower(layers),
+      updateProduction: () => false,
       updateFishing: () => updateAiFishing(layers),
       updateBoatRepair: () => updateAiBoatRepair(),
       respondToThreat: (threatId, attackedAssetId) => options.issueAiDefenseResponse(threatId, attackedAssetId, layers),
-      issueRaid: () => issueAiRaidCommand(layers),
-      updateRaid: () => options.updateAiRaidActive(deltaSeconds, layers),
-    });
-    changed = scoutChanged || crewChanged || changed;
+      issueRaid: () => false,
+      updateRaid: () => false,
+      demand: buildDemand(brain, counts),
+    }) || changed;
+    syncProducerFlags();
 
+    // 4. Army, fleet, scouting.
+    const home = getHome();
+    if (home) {
+      refreshReservedIds(brain);
+      const army = updateAiArmy({
+        state: brain.army,
+        memory: brain.memory,
+        now: brain.clock,
+        entities: options.entities,
+        entityById,
+        personality: AI_PERSONALITIES[brain.personality],
+        difficulty: AI_DIFFICULTY[getDifficultyId()],
+        tactic: intel.tactic,
+        home,
+        rally: getRally(home),
+        homeThreat: brain.threat.strength > 0 ? brain.threat : undefined,
+        reservedIds,
+        getDamageState: options.getDamageState,
+        getMaxHealth: options.getMaxHealth,
+        moveLand,
+        moveWater,
+        waterPointNear,
+        isLandReachable,
+        attack: attackVisible,
+        attackRemembered,
+      });
+      brain.lastArmyReady = army.readyCount;
+      brain.lastArmyStrength = army.armyStrength;
+      brain.lastDesiredWave = army.desiredWaveSize;
+      for (const event of army.events) {
+        controller.lastAction = event.message;
+        brain.lastDecision = event.message;
+        if (event.kind === 'waveLaunched') {
+          brain.stats.waves += 1;
+          controller.raidCount += 1;
+          const target = event.targetId ? entityById.get(event.targetId) : undefined;
+          if (event.attackerId && event.targetId) {
+            controller.lastRaidEvent = { kind: 'queued', attackerId: event.attackerId, targetId: event.targetId };
+          }
+          if (target) options.issuePlayerAssetWarning(target, 'incoming');
+        }
+        if (event.kind === 'fleetRaid' && event.attackerId && event.targetId) {
+          controller.lastRaidEvent = { kind: 'queued', attackerId: event.attackerId, targetId: event.targetId };
+        }
+        if (event.kind === 'retreat') brain.stats.retreats += 1;
+      }
+      controller.raidIssued = brain.army.mode === 'attack';
+      controller.raidDelaySeconds = Math.max(0, brain.army.nextWaveAt - brain.clock);
+      changed = army.changed || changed;
+      changed = updateScouting(brain, layers) || changed;
+    }
+
+    // 5. Crew, watchdogs, local auto-defense.
+    changed = assignAiFactoryCrew(layers) || changed;
+    changed = parkIdleWorkers() || changed;
+    changed = updateConstructionWatchdog(brain) || changed;
+    changed = updateStuckWatchdog(brain, deltaSeconds) || changed;
     changed = options.updateEnemyAutoDefense(layers) || changed;
+
+    if (changed) {
+      options.renderUnits(layers);
+    }
+    return changed;
+  }
+
+  function updateAiRival(deltaSeconds: number, layers: RenderLayers): boolean {
+    const controller = options.aiController;
+    let changed = false;
+    // Per-frame simulation for rival-owned timers and fights (only once the AI is awake).
+    if (controller.startDelaySeconds <= 0) {
+      changed = updateAiProduction(deltaSeconds, layers) || changed;
+      changed = options.updateAiRaidActive(deltaSeconds, layers) || changed;
+    }
+
+    const brain = getBrain();
+    brain.thinkAccumulator += deltaSeconds;
+    const interval = AI_DIFFICULTY[getDifficultyId()].thinkIntervalSeconds;
+    if (brain.thinkAccumulator >= interval || controller.tickCount === undefined) {
+      const elapsed = brain.thinkAccumulator;
+      brain.thinkAccumulator = 0;
+      changed = think(elapsed, layers) || changed;
+    }
 
     if (changed) {
       options.publishDebugState(layers);
@@ -709,31 +1309,27 @@ export function createAiRuntime(options: CreateAiRuntimeOptions): AiRuntime {
     return changed;
   }
 
-  function refreshStaleEconomyOrders(): void {
-    const hasActiveHarvest = options.entities.some(
-      (entity) =>
-        entity.kind === 'truck' &&
-        entity.faction === 'enemy' &&
-        options.getDamageState(entity) !== 'destroyed' &&
-        Boolean(entity.economy?.harvesting),
-    );
-    if (!hasActiveHarvest) {
-      options.aiController.harvestIssued = false;
-    }
+  function reportRivalAttacked(attackerId: string, targetId: string): void {
+    void targetId;
+    const brain = options.aiController.brain;
+    if (!brain) return;
+    const attacker = options.entities.find((entity) => entity.id === attackerId);
+    if (!attacker || attacker.faction !== 'player') return;
+    revealAttacker(brain.memory, attacker, brain.clock, options.getMaxHealth);
+    brain.stats.damageReveals += 1;
+  }
 
-    const hasActiveFishing = options.entities.some(
-      (entity) =>
-        entity.kind === 'boat' &&
-        entity.faction === 'enemy' &&
-        options.getDamageState(entity) !== 'destroyed' &&
-        Boolean(entity.economy?.fishing || entity.economy?.unloadingFish),
-    );
-    if (!hasActiveFishing) {
-      options.aiController.fishingIssued = false;
-    }
+  function getDebugInfo(): AiBrainDebugState | undefined {
+    const brain = options.aiController.brain;
+    if (!brain) return undefined;
+    return buildAiBrainDebugState(brain, pointsOfInterest ?? [], options.aiController.difficulty);
   }
 
   return {
     updateAiRival,
+    reportRivalAttacked,
+    canRivalPursue,
+    shouldRivalDefend,
+    getDebugInfo,
   };
 }

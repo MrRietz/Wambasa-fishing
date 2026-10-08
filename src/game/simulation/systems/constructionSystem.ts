@@ -56,7 +56,8 @@ export function updateConstructionJobs(input: ConstructionSystemInput): Construc
     construction.complete = true;
     construction.progressSeconds = construction.totalSeconds;
     site.name = getCompletedBuildingName(construction.building, site.faction);
-    site.commandable = true;
+    // Rival buildings finished by AI workers must never become player-commandable.
+    site.commandable = site.faction === 'player';
     site.economy = {
       ...site.economy,
       health: buildingCatalog[construction.building].health,

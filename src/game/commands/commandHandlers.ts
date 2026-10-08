@@ -1134,6 +1134,11 @@ export function executeAttackCommand(input: AttackCommandInput): TargetCommandOu
   }
 
   const landOrders = landAttackers.map((attacker, index) => {
+    const attackStats = getLandAttackStats(attacker, input.target);
+    const inWeaponRange = getCommandEdgeDistance(attacker, input.target) <= attackStats.range;
+    if (inWeaponRange) {
+      return { attacker, path: [], target: { x: attacker.x, y: attacker.y }, attackStats, inWeaponRange };
+    }
     const targetPoint = input.getApproachPoint(input.target, index, landAttackers.length);
     const route = planEntityPathToInteractionTarget(
       attacker,
@@ -1142,10 +1147,10 @@ export function executeAttackCommand(input: AttackCommandInput): TargetCommandOu
       input.target,
       (entity, start, goal) => input.findEntityLandPath?.(entity, start, goal) ?? input.findLandPath(start, goal),
     );
-    return { attacker, path: route.path, target: route.target };
+    return { attacker, path: route.path, target: route.target, attackStats, inWeaponRange };
   });
 
-  if (landAttackers.length > 0 && landOrders.some((order) => order.path.length === 0)) {
+  if (landAttackers.length > 0 && landOrders.some((order) => !order.inWeaponRange && order.path.length === 0)) {
     return {
       handled: true,
       result: {
@@ -1158,6 +1163,10 @@ export function executeAttackCommand(input: AttackCommandInput): TargetCommandOu
   }
 
   const boatOrders = boats.map((boat, index) => {
+    const inWeaponRange = getCommandEdgeDistance(boat, input.target) <= ATTACK_BOAT_RANGE;
+    if (inWeaponRange) {
+      return { boat, path: [], inWeaponRange };
+    }
     const targetPoint = {
       x: clamp(input.target.x + (index - (boats.length - 1) / 2) * 40, 60, WORLD_WIDTH - 60),
       y: clamp(input.target.y + (index % 2) * 12 - 6, 60, WORLD_HEIGHT - 60),
@@ -1165,10 +1174,11 @@ export function executeAttackCommand(input: AttackCommandInput): TargetCommandOu
     return {
       boat,
       path: input.findWaterPath ? input.findWaterPath({ x: boat.x, y: boat.y }, targetPoint) : [targetPoint],
+      inWeaponRange,
     };
   });
 
-  if (boats.length > 0 && boatOrders.some((order) => order.path.length === 0)) {
+  if (boats.length > 0 && boatOrders.some((order) => !order.inWeaponRange && order.path.length === 0)) {
     return {
       handled: true,
       result: {
@@ -1180,11 +1190,10 @@ export function executeAttackCommand(input: AttackCommandInput): TargetCommandOu
     };
   }
 
-  for (const { attacker, path } of landOrders) {
-    const attackStats = getLandAttackStats(attacker, input.target);
+  for (const { attacker, path, attackStats, inWeaponRange } of landOrders) {
     attacker.path = path;
     attacker.moveTarget = path[0];
-    attacker.movement.state = 'moving';
+    attacker.movement.state = inWeaponRange ? 'idle' : 'moving';
     attacker.economy = {
       ...attacker.economy,
       guardOrder: undefined,
@@ -1196,7 +1205,7 @@ export function executeAttackCommand(input: AttackCommandInput): TargetCommandOu
       repair: attacker.kind === 'worker' ? undefined : attacker.economy?.repair,
       attack: {
         targetId: input.target.id,
-        phase: 'to-target',
+        phase: inWeaponRange ? 'attacking' : 'to-target',
         damagePerSecond: attackStats.damagePerSecond,
         range: attackStats.range,
         leash:
@@ -1207,16 +1216,16 @@ export function executeAttackCommand(input: AttackCommandInput): TargetCommandOu
     };
   }
 
-  for (const { boat, path } of boatOrders) {
+  for (const { boat, path, inWeaponRange } of boatOrders) {
     boat.path = path;
     boat.moveTarget = path[0];
-    boat.movement.state = 'moving';
+    boat.movement.state = inWeaponRange ? 'idle' : 'moving';
     boat.economy = {
       ...boat.economy,
       fishing: undefined,
       unloadingFish: undefined,
       autoFishZoneId: undefined,
-      attack: { targetId: input.target.id, phase: 'to-target', damagePerSecond: ATTACK_BOAT_DAMAGE_PER_SECOND, range: ATTACK_BOAT_RANGE },
+      attack: { targetId: input.target.id, phase: inWeaponRange ? 'attacking' : 'to-target', damagePerSecond: ATTACK_BOAT_DAMAGE_PER_SECOND, range: ATTACK_BOAT_RANGE },
     };
   }
 
@@ -1678,4 +1687,15 @@ function getLandAttackStats(attacker: GameEntity, target: GameEntity): { damageP
     damagePerSecond: GUARD_ATTACK_DAMAGE_PER_SECOND,
     range: target.kind === 'boat' ? GUARD_BOAT_ATTACK_RANGE : GUARD_LAND_ATTACK_RANGE,
   };
+}
+
+function getCommandEdgeDistance(attacker: GameEntity, target: GameEntity): number {
+  return Math.max(0, Math.hypot(attacker.x - target.x, attacker.y - target.y) - getCommandCollisionRadius(attacker) - getCommandCollisionRadius(target));
+}
+
+function getCommandCollisionRadius(entity: GameEntity): number {
+  if (entity.collider.kind === 'circle') {
+    return entity.collider.radius;
+  }
+  return Math.max(entity.collider.width, entity.collider.height) * 0.5;
 }

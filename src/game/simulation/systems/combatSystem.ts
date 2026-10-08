@@ -18,6 +18,8 @@ export interface CombatSystemInput {
   findEntityLandPath?: (entity: GameEntity, start: { x: number; y: number }, goal: { x: number; y: number }) => Array<{ x: number; y: number }>;
   findWaterPath: (start: { x: number; y: number }, goal: { x: number; y: number }) => Array<{ x: number; y: number }>;
   applyDamage: (target: GameEntity, amount: number) => DamageState | undefined;
+  /** Optional: when false the attacker drops an out-of-range target instead of re-pathing to it. */
+  canPursue?: (attacker: GameEntity, target: GameEntity) => boolean;
 }
 
 export interface GuardTowerDefenseInput {
@@ -65,10 +67,12 @@ function getEdgeDistance(attacker: GameEntity, target: GameEntity, getCollisionR
 export function updateCombatAttackers(input: CombatSystemInput): CombatSystemOutput {
   let changed = false;
   const events: CombatSystemEvent[] = [];
+  const attackingEntities = input.attackers.filter((entity) => entity.economy?.attack);
+  const entityById = new Map(input.entities.map((entity) => [entity.id, entity]));
 
-  for (const attacker of input.attackers.filter((entity) => entity.economy?.attack)) {
+  for (const attacker of attackingEntities) {
     const attack = attacker.economy?.attack;
-    const target = attack ? input.entities.find((entity) => entity.id === attack.targetId) : undefined;
+    const target = attack ? entityById.get(attack.targetId) : undefined;
     if (!attack || !target || (target.economy?.health ?? 0) <= 0) {
       attacker.economy = { ...attacker.economy, attack: undefined };
       events.push({ kind: 'raidEnded', attackerId: attacker.id, message: 'Rival raid ended: target unavailable.' });
@@ -118,6 +122,18 @@ export function updateCombatAttackers(input: CombatSystemInput): CombatSystemOut
 
     if (edgeDistance > attack.range) {
       if (attacker.movement.speed <= 0) {
+        attacker.economy = { ...attacker.economy, attack: undefined };
+        changed = true;
+        continue;
+      }
+      if (attack.phase === 'to-target' && attacker.movement.state === 'moving' && (attacker.moveTarget || attacker.path.length > 0)) {
+        continue;
+      }
+      if (input.canPursue && !input.canPursue(attacker, target)) {
+        // Fog-honest pursuit: the attacker lost sight of the target, so it cannot re-path to it.
+        attacker.path = [];
+        attacker.moveTarget = undefined;
+        attacker.movement.state = 'idle';
         attacker.economy = { ...attacker.economy, attack: undefined };
         changed = true;
         continue;
@@ -216,10 +232,13 @@ export function updateGuardOrderSystem(input: GuardOrderSystemInput): CombatSyst
       continue;
     }
 
-    const target = input.entities
-      .filter((entity) => entity.faction !== guard.faction && entity.faction !== 'neutral' && (entity.economy?.health ?? 0) > 0)
-      .filter((entity) => getEdgeDistance(guard, entity, input.getCollisionRadius) <= order.acquireRange)
-      .sort((a, b) => getEdgeDistance(guard, a, input.getCollisionRadius) - getEdgeDistance(guard, b, input.getCollisionRadius))[0];
+    const target = findNearestTargetInRange(
+      guard,
+      input.entities,
+      order.acquireRange,
+      input.getCollisionRadius,
+      (entity) => entity.faction !== guard.faction && entity.faction !== 'neutral' && (entity.economy?.health ?? 0) > 0,
+    );
 
     if (!target) {
       continue;
@@ -268,11 +287,17 @@ export function updateAutoDefenseSystem(input: AutoDefenseSystemInput): CombatSy
       continue;
     }
 
-    const target = input.entities
-      .filter((entity) => entity.faction !== unit.faction && entity.faction !== 'neutral' && (entity.economy?.health ?? 0) > 0)
-      .filter((entity) => (unit.kind === 'boat' ? entity.kind === 'boat' : true))
-      .filter((entity) => getEdgeDistance(unit, entity, input.getCollisionRadius) <= acquireRange)
-      .sort((a, b) => getEdgeDistance(unit, a, input.getCollisionRadius) - getEdgeDistance(unit, b, input.getCollisionRadius))[0];
+    const target = findNearestTargetInRange(
+      unit,
+      input.entities,
+      acquireRange,
+      input.getCollisionRadius,
+      (entity) =>
+        entity.faction !== unit.faction &&
+        entity.faction !== 'neutral' &&
+        (entity.economy?.health ?? 0) > 0 &&
+        (unit.kind === 'boat' ? entity.kind === 'boat' : true),
+    );
 
     if (!target) {
       continue;
@@ -317,4 +342,28 @@ function resolveTowerTarget(tower: GameEntity, input: GuardTowerDefenseInput): G
     return currentTarget;
   }
   return input.findTarget(tower);
+}
+
+function findNearestTargetInRange(
+  origin: GameEntity,
+  entities: GameEntity[],
+  range: number,
+  getCollisionRadius: (entity: GameEntity) => number,
+  canTarget: (entity: GameEntity) => boolean,
+): GameEntity | undefined {
+  let nearestTarget: GameEntity | undefined;
+  let nearestDistance = Infinity;
+
+  for (const entity of entities) {
+    if (!canTarget(entity)) {
+      continue;
+    }
+    const distance = getEdgeDistance(origin, entity, getCollisionRadius);
+    if (distance <= range && distance < nearestDistance) {
+      nearestTarget = entity;
+      nearestDistance = distance;
+    }
+  }
+
+  return nearestTarget;
 }

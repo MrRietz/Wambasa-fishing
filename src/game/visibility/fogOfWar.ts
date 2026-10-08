@@ -77,7 +77,7 @@ function worldToIndex(state: VisibilityState, x: number, y: number): number {
   return row * state.columns + column;
 }
 
-function getVisionRadius(entity: GameEntity): number {
+export function getVisionRadius(entity: GameEntity): number {
   if (entity.kind === 'guardTower') return 560;
   if (entity.kind === 'factory' || entity.kind === 'enemyFactory') return 520;
   if (entity.kind === 'dock' || entity.kind === 'barracks' || entity.kind === 'techLab') return 380;

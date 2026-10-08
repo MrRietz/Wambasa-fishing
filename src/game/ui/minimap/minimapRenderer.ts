@@ -42,17 +42,20 @@ export function renderMinimap(input: MinimapRenderInput): void {
   ctx.fillRect(0, 0, width, height);
 
   for (const tile of mapData.terrain) {
+    // Roads are drawn as faint tracks so the radar reads as terrain, not as a block diagram.
+    ctx.globalAlpha = tile.kind === 'road' ? 0.5 : 1;
     ctx.fillStyle = `#${terrainFill(tile.kind).toString(16).padStart(6, '0')}`;
     ctx.fillRect(tile.x * scaleX, tile.y * scaleY, tile.width * scaleX, tile.height * scaleY);
   }
+  ctx.globalAlpha = 1;
 
-  ctx.strokeStyle = 'rgba(246, 212, 138, 0.85)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, 518 * scaleY);
-  ctx.bezierCurveTo(410 * scaleX, 464 * scaleY, 870 * scaleX, 585 * scaleY, 1320 * scaleX, 505 * scaleY);
-  ctx.bezierCurveTo(2010 * scaleX, 412 * scaleY, 3020 * scaleX, 560 * scaleY, width, 474 * scaleY);
-  ctx.stroke();
+  // Light surf line around open water instead of the old hand-placed brass curve.
+  ctx.strokeStyle = 'rgba(214, 240, 236, 0.55)';
+  ctx.lineWidth = 1;
+  for (const tile of mapData.terrain) {
+    if (tile.kind !== 'water') continue;
+    ctx.strokeRect(tile.x * scaleX + 0.5, tile.y * scaleY + 0.5, tile.width * scaleX - 1, tile.height * scaleY - 1);
+  }
 
   ctx.fillStyle = '#aeb9c2';
   const activeResourceFields = input.resourceFields?.length
@@ -92,17 +95,21 @@ export function renderMinimap(input: MinimapRenderInput): void {
     if (entity.renderable.hidden) {
       continue;
     }
-    const color = entity.faction === 'enemy' ? '#ea6f5f' : entity.faction === 'player' ? '#67c2ff' : '#d9d5bf';
+    const color = entity.faction === 'enemy' ? '#ff6f5c' : entity.faction === 'player' ? '#6fd0ff' : '#d9d5bf';
     ctx.fillStyle = color;
+    ctx.strokeStyle = 'rgba(4, 10, 12, 0.85)';
+    ctx.lineWidth = 1;
     if (entity.collider.kind === 'rect') {
       const widthPx = Math.max(entity.kind === 'boat' ? 4 : 5, entity.collider.width * scaleX * 0.38);
       const heightPx = Math.max(entity.kind === 'boat' ? 2 : 4, entity.collider.height * scaleY * 0.34);
       ctx.fillRect(entity.x * scaleX - widthPx / 2, entity.y * scaleY - heightPx / 2, widthPx, heightPx);
+      ctx.strokeRect(entity.x * scaleX - widthPx / 2 - 0.5, entity.y * scaleY - heightPx / 2 - 0.5, widthPx + 1, heightPx + 1);
       continue;
     }
     ctx.beginPath();
     ctx.arc(entity.x * scaleX, entity.y * scaleY, entity.faction === 'enemy' ? 2.8 : 2.6, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
   }
 
   for (const ping of attackPings) {
@@ -134,9 +141,9 @@ export function renderMinimap(input: MinimapRenderInput): void {
   }
 
   const viewportRect = getMinimapViewportRect(canvas, mapData, camera, input.viewportWidth, input.viewportHeight);
-  ctx.fillStyle = 'rgba(255, 242, 194, 0.09)';
-  ctx.strokeStyle = '#fff2c2';
-  ctx.lineWidth = 3;
+  ctx.fillStyle = 'rgba(255, 242, 194, 0.07)';
+  ctx.strokeStyle = 'rgba(255, 242, 194, 0.92)';
+  ctx.lineWidth = 2;
   ctx.fillRect(viewportRect.x, viewportRect.y, viewportRect.width, viewportRect.height);
   ctx.strokeRect(viewportRect.x, viewportRect.y, viewportRect.width, viewportRect.height);
 }

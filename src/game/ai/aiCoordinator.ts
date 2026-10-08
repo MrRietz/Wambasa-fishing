@@ -1,17 +1,29 @@
-import { buildingCatalog } from '../data/buildings';
-import { productionCatalog, type ProductionKind } from '../data/production';
+import type { ProductionKind } from '../data/production';
 import type { RtsDebugState } from '../debug/debugState';
 import type { DamageState, GameEntity } from '../entities/components';
+import { ensureAiBrainState, type AiBrainState } from './aiBrain';
+import {
+  AI_DIFFICULTY,
+  AI_PERSONALITIES,
+  personalityForStrategy,
+  type AiBuildItem,
+  type AiDifficulty,
+  type AiPersonality,
+  type AiStrategy,
+} from './aiConfig';
+import { countAiOwnAssets, executeAiEconomyPlan } from './aiEconomyPlanner';
 import type { AiIntelState, AiTactic } from './aiIntelSystem';
-import { updateAiEconomyRebuildSystem } from './aiRebuildSystem';
-import { chooseAiBarracksProduction, chooseAiDockProduction, chooseAiFactoryProduction, findAiTerritoryThreat } from './aiPressureSystem';
+import { findAiTerritoryThreat } from './aiPressureSystem';
 
-export type AiStrategy = 'economicBoom' | 'harborPressure' | 'siege';
+export type { AiStrategy } from './aiConfig';
 
 export interface AiControllerState {
   strategy: AiStrategy;
+  personality?: AiPersonality;
+  difficulty?: AiDifficulty;
   activeTactic?: AiTactic;
   intel?: AiIntelState;
+  brain?: AiBrainState;
   startDelaySeconds: number;
   raidDelaySeconds: number;
   territoryAlertCooldownSeconds: number;
@@ -34,6 +46,10 @@ export interface AiControllerState {
   lastDefenseEvent?: RtsDebugState['ai']['lastDefenseEvent'];
 }
 
+/**
+ * One AI decision pass ("think"). The runtime calls this at the difficulty think interval with the
+ * accumulated delta; unit-level simulation (production timers, combat) runs every frame elsewhere.
+ */
 export interface AiCoordinatorInput {
   deltaSeconds: number;
   state: AiControllerState;
@@ -45,114 +61,50 @@ export interface AiCoordinatorInput {
   queueProduction: (product: ProductionKind) => boolean;
   buildDock: () => boolean;
   buildBarracks: () => boolean;
+  buildGuardTower?: () => boolean;
   updateProduction: () => boolean;
   updateFishing: () => boolean;
   updateBoatRepair: () => boolean;
   respondToThreat: (threatId: string, attackedAssetId: string) => boolean;
   issueRaid: () => boolean;
   updateRaid: () => boolean;
+  /** Extra desired totals from tactics/threats (e.g. more guards when attacked). */
+  demand?: Partial<Record<AiBuildItem, number>>;
+  /** Metal held back (e.g. for an emergency guard tower while the base is attacked). */
+  reserveMetal?: number;
+}
+
+const OPENING_TIMEOUT_SECONDS = 110;
+const ECONOMY_BLOCK_SKIP_SECONDS = 40;
+
+export function getAiPersonality(state: AiControllerState): AiPersonality {
+  return state.personality ?? personalityForStrategy(state.strategy);
 }
 
 export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
+  const state = input.state;
   let changed = false;
-  input.state.tickCount = (input.state.tickCount ?? 0) + 1;
-  input.state.lastTickDeltaSeconds = input.deltaSeconds;
-  if (input.state.startDelaySeconds > 0) {
-    input.state.startDelaySeconds = Math.max(0, input.state.startDelaySeconds - input.deltaSeconds);
+  state.tickCount = (state.tickCount ?? 0) + 1;
+  state.lastTickDeltaSeconds = input.deltaSeconds;
+  if (state.startDelaySeconds > 0) {
+    state.startDelaySeconds = Math.max(0, state.startDelaySeconds - input.deltaSeconds);
     return false;
   }
 
-  input.state.territoryAlertCooldownSeconds = Math.max(0, input.state.territoryAlertCooldownSeconds - input.deltaSeconds);
+  const personality = getAiPersonality(state);
+  const difficultyId = state.difficulty ?? 'normal';
+  const brain = ensureAiBrainState(state.brain, personality, difficultyId);
+  state.brain = brain;
+  brain.clock += input.deltaSeconds;
+  const now = brain.clock;
 
-  if (!input.state.harvestIssued) {
-    changed = input.tryIssueHarvest() || changed;
-  }
+  state.territoryAlertCooldownSeconds = Math.max(0, state.territoryAlertCooldownSeconds - input.deltaSeconds);
 
-  const rebuildChanged = updateAiEconomyRebuildSystem({
-    entities: input.entities,
-    availableMetal: input.availableMetal,
-    availableCash: input.availableCash,
-    getDamageState: input.getDamageState,
-    queueProduction: (product) => input.queueProduction(product),
-    buildDock: () => input.buildDock(),
-    buildBarracks: () => input.buildBarracks(),
-    onRebuildAction: (message) => {
-      input.state.lastAction = message;
-    },
-    onResetHarvest: () => {
-      input.state.harvestIssued = false;
-    },
-    onResetDock: () => {
-      input.state.dockBuilt = false;
-      input.state.boatProductionQueued = false;
-      input.state.fishingIssued = false;
-    },
-    onResetBarracks: () => {
-      input.state.barracksProductionQueued = false;
-    },
-    onResetBoat: () => {
-      input.state.boatProductionQueued = false;
-      input.state.fishingIssued = false;
-    },
-  });
-  changed = rebuildChanged || changed;
+  // Every think: idle trucks go harvesting (each truck independently).
+  changed = input.tryIssueHarvest() || changed;
 
-  if (!rebuildChanged && input.state.openingComplete && !input.state.dockBuilt && input.state.harvestIssued && input.availableMetal >= buildingCatalog.dock.cost) {
-    changed = input.buildDock() || changed;
-  }
-
-  if (!rebuildChanged && !input.state.openingComplete) {
-    changed = runAiOpeningPlan(input) || changed;
-  }
-
-  if (!rebuildChanged && input.state.openingComplete && !changed) {
-    const hasBarracks = input.entities.some((entity) => entity.faction === 'enemy' && entity.kind === 'barracks' && input.getDamageState(entity) !== 'destroyed');
-    const barracksProduct = hasBarracks && !input.state.barracksProductionQueued
-      ? chooseAiBarracksProduction({
-          strategy: input.state.strategy,
-          tactic: input.state.activeTactic,
-          entities: input.entities,
-          availableMetal: input.availableMetal,
-          availableCash: input.availableCash,
-          getDamageState: input.getDamageState,
-        })
-      : null;
-    const factoryProduct = !barracksProduct && !input.state.productionQueued
-      ? chooseAiFactoryProduction({
-          strategy: input.state.strategy,
-          tactic: input.state.activeTactic,
-          entities: input.entities,
-          availableMetal: input.availableMetal,
-          availableCash: input.availableCash,
-          getDamageState: input.getDamageState,
-        })
-      : null;
-
-    if (barracksProduct) {
-      changed = input.queueProduction(barracksProduct) || changed;
-    } else if (factoryProduct) {
-      changed = input.queueProduction(factoryProduct) || changed;
-    }
-    if (!factoryProduct && !barracksProduct && !hasBarracks && input.availableMetal >= buildingCatalog.barracks.cost) {
-      changed = input.buildBarracks() || changed;
-    } else if (!factoryProduct && !barracksProduct && !input.state.dockBuilt && input.availableMetal >= buildingCatalog.dock.cost) {
-      changed = input.buildDock() || changed;
-    } else if (!factoryProduct && !barracksProduct && input.state.dockBuilt && !input.state.boatProductionQueued) {
-      const dockProduct = chooseAiDockProduction({
-        strategy: input.state.strategy,
-        tactic: input.state.activeTactic,
-        entities: input.entities,
-        availableMetal: input.availableMetal,
-        availableCash: input.availableCash,
-        getDamageState: input.getDamageState,
-      });
-      if (dockProduct) {
-        changed = input.queueProduction(dockProduct) || changed;
-      } else if (input.availableMetal >= productionCatalog.boat.cost) {
-        changed = input.queueProduction('boat') || changed;
-      }
-    }
-  }
+  // Continuous economy plan.
+  changed = runAiEconomy(input, brain, now) || changed;
 
   changed = input.updateProduction() || changed;
   changed = input.updateFishing() || changed;
@@ -160,6 +112,111 @@ export function tickAiCoordinator(input: AiCoordinatorInput): boolean {
   changed = updateAiTerritoryDefense(input) || changed;
   changed = updateAiRaid(input) || changed;
   return changed;
+}
+
+function runAiEconomy(input: AiCoordinatorInput, brain: AiBrainState, now: number): boolean {
+  const state = input.state;
+  const personality = AI_PERSONALITIES[getAiPersonality(state)];
+  const difficulty = AI_DIFFICULTY[state.difficulty ?? 'normal'];
+  const counts = countAiOwnAssets(input.entities, input.getDamageState);
+  const producers = findProducers(input.entities, input.getDamageState);
+
+  if (!state.openingComplete) {
+    const openingSteps = personality.buildOrder.slice(0, 6);
+    const satisfied = openingSteps.every((step) => counts[step.item] >= step.count);
+    if (satisfied || now >= OPENING_TIMEOUT_SECONDS) {
+      state.openingComplete = true;
+      state.lastAction = `Rival ${personality.label.toLowerCase()} opening complete.`;
+    }
+  }
+
+  const result = executeAiEconomyPlan({
+    personality,
+    difficulty,
+    now,
+    counts,
+    demand: input.demand,
+    skippedUntil: brain.economy.skippedUntil,
+    metal: Math.max(0, input.availableMetal - (input.reserveMetal ?? 0)),
+    cash: input.availableCash,
+    maxActions: 3,
+    canStart: (item) => {
+      switch (item) {
+        case 'worker':
+        case 'truck':
+          return hasQueueRoom(producers.factory, difficulty.maxQueuePerProducer);
+        case 'guard':
+        case 'saboteur':
+          return hasQueueRoom(producers.barracks, difficulty.maxQueuePerProducer);
+        case 'boat':
+        case 'attackBoat':
+          return hasQueueRoom(producers.dock, difficulty.maxQueuePerProducer);
+        case 'dock':
+        case 'barracks':
+          return Boolean(producers.factory);
+        case 'guardTower':
+          return Boolean(input.buildGuardTower) && Boolean(producers.factory);
+        default:
+          return false;
+      }
+    },
+    start: (item) => {
+      switch (item) {
+        case 'dock':
+          return input.buildDock();
+        case 'barracks':
+          return input.buildBarracks();
+        case 'guardTower':
+          return input.buildGuardTower?.() ?? false;
+        default:
+          return input.queueProduction(item);
+      }
+    },
+  });
+
+  if (result.started.length > 0) {
+    brain.economy.lastSpendAt = now;
+  }
+  // Stall watchdog: a step that keeps blocking spending without any income progress is skipped for a while.
+  if (result.blockedItem && result.blockedItem === brain.economy.blockedItem) {
+    const noIncome = input.availableMetal <= (brain.economy.blockedMetal ?? 0) + 20;
+    if (now - brain.economy.blockedSince > ECONOMY_BLOCK_SKIP_SECONDS && result.started.length === 0 && noIncome) {
+      brain.economy.skippedUntil[result.blockedItem] = now + 30;
+      brain.stats.watchdogRecoveries += 1;
+      brain.lastDecision = `Economy watchdog: skipping ${result.blockedItem} for 30s (blocked ${Math.round(now - brain.economy.blockedSince)}s).`;
+      brain.economy.blockedItem = undefined;
+      brain.economy.blockedSince = now;
+    }
+  } else {
+    brain.economy.blockedItem = result.blockedItem;
+    brain.economy.blockedSince = now;
+    brain.economy.blockedMetal = input.availableMetal;
+  }
+  return result.started.length > 0;
+}
+
+interface AiProducers {
+  factory?: GameEntity;
+  barracks?: GameEntity;
+  dock?: GameEntity;
+}
+
+function findProducers(entities: GameEntity[], getDamageState: (entity: GameEntity) => DamageState | undefined): AiProducers {
+  const producers: AiProducers = {};
+  for (const entity of entities) {
+    if (entity.faction !== 'enemy' || getDamageState(entity) === 'destroyed') continue;
+    if (entity.economy?.construction && !entity.economy.construction.complete) continue;
+    if (entity.kind === 'enemyFactory' && !producers.factory) producers.factory = entity;
+    if (entity.kind === 'barracks' && !producers.barracks) producers.barracks = entity;
+    if (entity.kind === 'dock' && !producers.dock) producers.dock = entity;
+  }
+  return producers;
+}
+
+function hasQueueRoom(producer: GameEntity | undefined, maxQueue: number): boolean {
+  if (!producer) return false;
+  if ((producer.economy?.disabledSeconds ?? 0) > 0) return false;
+  return (producer.economy?.productionQueue?.length ?? 0) < maxQueue;
 }
 
 function updateAiTerritoryDefense(input: AiCoordinatorInput): boolean {
@@ -190,149 +247,4 @@ function updateAiRaid(input: AiCoordinatorInput): boolean {
     return input.issueRaid();
   }
   return input.updateRaid();
-}
-
-type AiOpeningItem = 'worker' | 'truck' | 'dock' | 'boat' | 'attackBoat' | 'barracks' | 'guard' | 'saboteur';
-type AiOpeningStep = { item: AiOpeningItem; targetCount: number };
-
-function runAiOpeningPlan(input: AiCoordinatorInput): boolean {
-  if (input.state.openingComplete) {
-    return false;
-  }
-
-  const plan = getAiOpeningPlan(input.state.strategy);
-  let allSatisfied = true;
-  for (const step of plan) {
-    const item = step.item;
-    if (isOpeningStepSatisfied(input.entities, step, input.getDamageState)) {
-      continue;
-    }
-
-    allSatisfied = false;
-    if (item === 'dock') {
-      if (input.availableMetal >= buildingCatalog.dock.cost) {
-        const built = input.buildDock();
-        if (built) {
-          input.state.lastAction = `Rival opening: dock established for ${describeAiStrategy(input.state.strategy)} plan.`;
-        }
-        return built;
-      }
-      return false;
-    }
-    if (item === 'barracks') {
-      if (input.availableMetal >= buildingCatalog.barracks.cost) {
-        const built = input.buildBarracks();
-        if (built) {
-          input.state.lastAction = `Rival opening: barracks established for ${describeAiStrategy(input.state.strategy)} plan.`;
-        }
-        return built;
-      }
-      return false;
-    }
-
-    const definition = productionCatalog[item];
-    if (input.availableMetal >= definition.cost && input.availableCash >= (definition.cashCost ?? 0)) {
-      const queued = input.queueProduction(item);
-      if (queued) {
-        input.state.lastAction = `Rival opening: queued ${definition.label.toLowerCase()} for ${describeAiStrategy(input.state.strategy)} plan.`;
-      }
-      return queued;
-    }
-    return false;
-  }
-
-  if (allSatisfied) {
-    input.state.openingComplete = true;
-    input.state.lastAction = `Rival ${describeAiStrategy(input.state.strategy)} opening complete.`;
-  }
-  return false;
-}
-
-function getAiOpeningPlan(strategy: AiStrategy): AiOpeningStep[] {
-  switch (strategy) {
-    case 'economicBoom':
-      return [
-        { item: 'worker', targetCount: 3 },
-        { item: 'truck', targetCount: 1 },
-        { item: 'dock', targetCount: 1 },
-        { item: 'boat', targetCount: 1 },
-        { item: 'barracks', targetCount: 1 },
-        { item: 'guard', targetCount: 2 },
-        { item: 'truck', targetCount: 2 },
-        { item: 'boat', targetCount: 2 },
-      ];
-    case 'harborPressure':
-      return [
-        { item: 'worker', targetCount: 3 },
-        { item: 'truck', targetCount: 1 },
-        { item: 'dock', targetCount: 1 },
-        { item: 'boat', targetCount: 1 },
-        { item: 'barracks', targetCount: 1 },
-        { item: 'guard', targetCount: 2 },
-        { item: 'attackBoat', targetCount: 1 },
-      ];
-    case 'siege':
-    default:
-      return [
-        { item: 'worker', targetCount: 3 },
-        { item: 'truck', targetCount: 1 },
-        { item: 'dock', targetCount: 1 },
-        { item: 'boat', targetCount: 1 },
-        { item: 'barracks', targetCount: 1 },
-        { item: 'guard', targetCount: 2 },
-        { item: 'saboteur', targetCount: 1 },
-        { item: 'guard', targetCount: 3 },
-      ];
-  }
-}
-
-function isOpeningStepSatisfied(
-  entities: GameEntity[],
-  step: AiOpeningStep,
-  getDamageState: (entity: GameEntity) => DamageState | undefined,
-): boolean {
-  const item = step.item;
-  if (item === 'dock') {
-    return entities.filter((entity) => entity.faction === 'enemy' && entity.kind === 'dock' && getDamageState(entity) !== 'destroyed').length >= step.targetCount;
-  }
-  if (item === 'barracks') {
-    return entities.filter((entity) => entity.faction === 'enemy' && entity.kind === 'barracks' && getDamageState(entity) !== 'destroyed').length >= step.targetCount;
-  }
-
-  const activeCount = entities.filter((entity) => isEnemyOpeningAsset(entity, item, getDamageState)).length;
-  const queuedCount = entities.reduce((total, entity) => {
-    if (entity.faction !== 'enemy') return total;
-    return total + (entity.economy?.productionQueue?.filter((queueItem) => queueItem.product === item).length ?? 0);
-  }, 0);
-  return activeCount + queuedCount >= step.targetCount;
-}
-
-function isEnemyOpeningAsset(
-  entity: GameEntity,
-  item: Exclude<AiOpeningItem, 'dock'>,
-  getDamageState: (entity: GameEntity) => DamageState | undefined,
-): boolean {
-  if (entity.faction !== 'enemy' || getDamageState(entity) === 'destroyed') {
-    return false;
-  }
-  switch (item) {
-    case 'attackBoat':
-      return entity.kind === 'boat' && entity.economy?.combatRole === 'attack';
-    case 'boat':
-      return entity.kind === 'boat' && entity.economy?.combatRole !== 'attack';
-    default:
-      return entity.kind === item;
-  }
-}
-
-function describeAiStrategy(strategy: AiStrategy): string {
-  switch (strategy) {
-    case 'economicBoom':
-      return 'economic boom';
-    case 'harborPressure':
-      return 'harbor pressure';
-    case 'siege':
-    default:
-      return 'siege';
-  }
 }

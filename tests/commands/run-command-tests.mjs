@@ -18,3 +18,16 @@ await build({
 });
 
 await import(`${pathToFileURL(outfile).href}?cacheBust=${Date.now()}`);
+
+const pathfindingOutfile = resolve('.tmp-command-tests/pathfinding-performance.spec.mjs');
+await build({
+  entryPoints: ['tests/commands/pathfinding-performance.spec.ts'],
+  outfile: pathfindingOutfile,
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node20',
+  sourcemap: 'inline',
+  logLevel: 'silent',
+});
+await import(`${pathToFileURL(pathfindingOutfile).href}?cacheBust=${Date.now()}`);

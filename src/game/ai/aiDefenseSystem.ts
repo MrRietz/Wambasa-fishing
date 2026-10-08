@@ -19,6 +19,8 @@ export interface AiDefenseInput {
   findEntityLandPath?: (entity: GameEntity, start: { x: number; y: number }, goal: { x: number; y: number }) => Array<{ x: number; y: number }>;
   getApproachPoint: (target: GameEntity, index: number, count: number) => { x: number; y: number };
   buildDefense: () => GameEntity | undefined;
+  /** Defenders pulled per response (default 2). */
+  maxDefenders?: number;
 }
 
 export type AiDefenseEvent =
@@ -89,7 +91,7 @@ export function updateAiDefenseResponse(input: AiDefenseInput): AiDefenseOutput 
       input.getDamageState(entity) !== 'destroyed',
   ).sort((a, b) => getDefenderPriority(a) - getDefenderPriority(b));
 
-  for (const guard of defenders.slice(0, 2)) {
+  for (const guard of defenders.slice(0, input.maxDefenders ?? 2)) {
     const targetPoint = input.getApproachPoint(threat, 0, 1);
     const path = input.findEntityLandPath?.(guard, { x: guard.x, y: guard.y }, targetPoint)
       ?? input.findLandPath({ x: guard.x, y: guard.y }, targetPoint);

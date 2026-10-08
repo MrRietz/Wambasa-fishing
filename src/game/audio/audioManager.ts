@@ -340,6 +340,11 @@ export class AudioManager {
     envelope.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
     oscillator.connect(envelope);
     envelope.connect(destination);
+    // Detach finished one-shot nodes so the audio graph does not keep them reachable.
+    oscillator.onended = () => {
+      oscillator.disconnect();
+      envelope.disconnect();
+    };
     oscillator.start(startTime);
     oscillator.stop(startTime + duration + 0.03);
   }

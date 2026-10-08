@@ -22,6 +22,7 @@ export function renderEntityLayers(layers: RenderLayers, context: EntityRenderCo
 
 export function renderBuildings(layers: RenderLayers, context: EntityRenderContext): void {
   const liveIds = new Set<string>();
+  const ground = getOrCreateLayerGround(layers.buildings);
   for (const entity of context.entities) {
     if (entity.renderable.hidden || entity.renderable.layer !== 'buildings' || context.getDamageState(entity) === 'destroyed') {
       continue;
@@ -34,14 +35,18 @@ export function renderBuildings(layers: RenderLayers, context: EntityRenderConte
     const entry = getOrCreateEntityRenderEntry(layers.buildings, entity.id, texture);
     updateBuildingSprite(entry.sprite, entity, texture);
     entry.overlay.clear();
-    drawBuildingSpriteOverlay(entry.overlay, entity, context);
+    drawBuildingSpriteOverlay(entry.overlay, entity, context, getSpriteTop(entry.sprite));
+    entry.sprite.zIndex = entity.y;
+    entry.overlay.zIndex = entity.y + 0.5;
     layers.buildings.addChild(entry.sprite, entry.overlay);
+    drawBuildingGround(ground, entity);
   }
   pruneEntityRenderEntries(layers.buildings, liveIds);
 }
 
 export function renderUnits(layers: RenderLayers, context: EntityRenderContext): void {
   const liveIds = new Set<string>();
+  const ground = getOrCreateLayerGround(layers.units);
   for (const entity of context.entities) {
     if (entity.renderable.hidden || entity.renderable.layer !== 'units' || context.getDamageState(entity) === 'destroyed') {
       continue;
@@ -54,8 +59,11 @@ export function renderUnits(layers: RenderLayers, context: EntityRenderContext):
     const entry = getOrCreateEntityRenderEntry(layers.units, entity.id, texture);
     updateUnitSprite(entry.sprite, entity, texture);
     entry.overlay.clear();
-    drawUnitSpriteOverlay(entry.overlay, entity, context);
+    drawUnitSpriteOverlay(entry.overlay, entity, context, getSpriteTop(entry.sprite));
+    entry.sprite.zIndex = entity.y;
+    entry.overlay.zIndex = entity.y + 0.5;
     layers.units.addChild(entry.sprite, entry.overlay);
+    drawUnitGround(ground, entity);
   }
   pruneEntityRenderEntries(layers.units, liveIds);
 }
@@ -103,6 +111,76 @@ interface LayerRenderCache {
   entities: Map<string, EntityRenderEntry>;
   effects: Map<string, EffectRenderEntry>;
   overlay?: Graphics;
+  ground?: Graphics;
+}
+
+/** Looks up the cached display sprite of a rendered unit/building (used by the FX layer for hit flashes). */
+export function getEntityDisplaySprite(layers: RenderLayers, entityId: string): Sprite | undefined {
+  return layerRenderCaches.get(layers.units)?.entities.get(entityId)?.sprite ?? layerRenderCaches.get(layers.buildings)?.entities.get(entityId)?.sprite;
+}
+
+// One shared ground graphic per layer, kept at the bottom of the layer, holds the soft contact
+// shadows and team-colour footprints so they sit under every sprite instead of over it.
+function getOrCreateLayerGround(layer: Container): Graphics {
+  const cache = getLayerRenderCache(layer);
+  if (!cache.ground) {
+    cache.ground = new Graphics({ label: 'entity-ground-shadows' });
+    cache.ground.zIndex = -1_000_000;
+  }
+  if (cache.ground.parent !== layer) {
+    layer.addChildAt(cache.ground, 0);
+  }
+  cache.ground.clear();
+  return cache.ground;
+}
+
+function getSpriteTop(sprite: Sprite): number {
+  return sprite.y - Math.abs(sprite.height) * sprite.anchor.y;
+}
+
+function drawUnitGround(graphic: Graphics, entity: GameEntity): void {
+  const teamColor = factionPrimaryColor(entity);
+  if (entity.collider.kind === 'circle') {
+    const radius = entity.collider.radius;
+    const footY = entity.y + radius * 0.78;
+    graphic.ellipse(entity.x, footY + 2, radius * 1.15, radius * 0.42).fill({ color: 0x020506, alpha: 0.2 });
+    graphic.ellipse(entity.x, footY + 1, radius * 0.86, radius * 0.3).fill({ color: 0x020506, alpha: 0.28 });
+    graphic.ellipse(entity.x, footY, radius * 1.02, radius * 0.38).stroke({ color: teamColor, width: 2, alpha: 0.62 });
+    return;
+  }
+  const footY = entity.y + entity.collider.height * 0.36;
+  const shadowWidth = entity.collider.width * (entity.kind === 'boat' ? 0.62 : 0.56);
+  if (entity.kind === 'boat') {
+    graphic.ellipse(entity.x, footY, shadowWidth * 1.1, entity.collider.height * 0.34).fill({ color: 0x041217, alpha: 0.22 });
+  } else {
+    graphic.ellipse(entity.x, footY + 3, shadowWidth * 1.08, entity.collider.height * 0.3).fill({ color: 0x020506, alpha: 0.22 });
+    graphic.ellipse(entity.x, footY + 2, shadowWidth * 0.86, entity.collider.height * 0.22).fill({ color: 0x020506, alpha: 0.26 });
+  }
+  graphic.ellipse(entity.x, footY, shadowWidth, entity.collider.height * 0.26).stroke({ color: teamColor, width: 2, alpha: 0.5 });
+}
+
+function drawBuildingGround(graphic: Graphics, entity: GameEntity): void {
+  if (entity.collider.kind !== 'rect') return;
+  const width = entity.collider.width;
+  const height = entity.collider.height;
+  const centerY = entity.y + height * 0.28;
+  graphic.ellipse(entity.x + width * 0.04, centerY + 6, width * 0.66, height * 0.42).fill({ color: 0x020506, alpha: 0.16 });
+  graphic.ellipse(entity.x + width * 0.02, centerY + 4, width * 0.56, height * 0.34).fill({ color: 0x020506, alpha: 0.2 });
+  graphic.ellipse(entity.x, centerY, width * 0.5, height * 0.3).stroke({ color: factionPrimaryColor(entity), width: 2, alpha: 0.14 });
+}
+
+/** Framed health bar: dark plate, ratio-coloured fill, top highlight and quarter ticks. */
+function drawHealthBar(graphic: Graphics, centerX: number, topY: number, width: number, ratio: number, height = 6): void {
+  const left = centerX - width / 2;
+  const fillColor = ratio > 0.6 ? 0x7fdc8c : ratio > 0.3 ? 0xffc857 : 0xff5f45;
+  graphic.roundRect(left - 2, topY - 2, width + 4, height + 4, 3).fill({ color: 0x050909, alpha: 0.78 });
+  if (ratio > 0) {
+    graphic.roundRect(left, topY, Math.max(2, width * ratio), height, 2).fill({ color: fillColor, alpha: 0.96 });
+    graphic.rect(left + 1, topY + 1, Math.max(1, width * ratio - 2), 1.5).fill({ color: 0xffffff, alpha: 0.28 });
+  }
+  for (let tick = 1; tick < 4; tick += 1) {
+    graphic.rect(left + (width * tick) / 4 - 0.5, topY, 1, height).fill({ color: 0x050909, alpha: 0.5 });
+  }
 }
 
 const layerRenderCaches = new WeakMap<Container, LayerRenderCache>();
@@ -306,18 +384,13 @@ function updateBuildingSprite(sprite: Sprite, entity: GameEntity, texture: Textu
   }
 }
 
-function drawUnitSpriteOverlay(graphic: Graphics, entity: GameEntity, context: EntityRenderContext): void {
+function drawUnitSpriteOverlay(graphic: Graphics, entity: GameEntity, context: EntityRenderContext, spriteTop: number): void {
   const direction = entity.animation.direction ?? 'south';
-  const factionColor = factionPrimaryColor(entity);
-  const factionHighlight = factionHighlightColor(entity);
   drawUnitActionEffect(graphic, entity, resolveActionFacingVector(entity, context, direction));
+  // Bars sit just above the sprite artwork; the sprite's transparent top padding is ~18%.
+  const barTop = spriteTop + Math.max(4, (entity.y - spriteTop) * 0.2);
   if (entity.collider.kind === 'circle') {
-    graphic.ellipse(entity.x, entity.y + entity.collider.radius * 0.76, entity.collider.radius * 1.1, entity.collider.radius * 0.36).fill({
-      color: factionColor,
-      alpha: 0.28,
-    });
-    graphic.circle(entity.x, entity.y + entity.collider.radius * 0.18, entity.collider.radius * 0.94).stroke({ color: factionHighlight, width: 2.5, alpha: 0.38 });
-    drawDamageOverlay(graphic, entity, entity.x - entity.collider.radius, entity.y - entity.collider.radius, entity.collider.radius * 2, entity.collider.radius * 2, context);
+    drawDamageOverlay(graphic, entity, entity.x - entity.collider.radius, entity.y - entity.collider.radius, entity.collider.radius * 2, entity.collider.radius * 2, context, barTop);
     return;
   }
   const left = entity.x - entity.collider.width / 2;
@@ -325,25 +398,27 @@ function drawUnitSpriteOverlay(graphic: Graphics, entity: GameEntity, context: E
   const cargo = entity.economy?.cargo;
   if (cargo && cargo.amount > 0) {
     const ratio = clamp(cargo.amount / cargo.capacity, 0, 1);
-    graphic.rect(left + 8, top - 12, entity.collider.width - 16, 5).fill({ color: 0x160f0d, alpha: 0.72 });
-    graphic.rect(left + 8, top - 12, (entity.collider.width - 16) * ratio, 5).fill(entity.kind === 'boat' ? 0xbdeaf2 : 0xd7dde0);
+    const cargoWidth = Math.min(54, entity.collider.width * 0.7);
+    const cargoLeft = entity.x - cargoWidth / 2;
+    const cargoTop = barTop + 9;
+    graphic.roundRect(cargoLeft - 1.5, cargoTop - 1.5, cargoWidth + 3, 7, 3).fill({ color: 0x050909, alpha: 0.72 });
+    graphic.roundRect(cargoLeft, cargoTop, Math.max(2, cargoWidth * ratio), 4, 2).fill(entity.kind === 'boat' ? 0x8fe4ff : 0xdfe6e8);
   }
-  graphic.ellipse(entity.x - entity.collider.width * 0.12, entity.y + entity.collider.height * 0.28, entity.collider.width * 0.44, 8).fill({
-    color: factionColor,
-    alpha: 0.24,
-  });
-  drawDamageOverlay(graphic, entity, left, top, entity.collider.width, entity.collider.height, context);
+  drawDamageOverlay(graphic, entity, left, top, entity.collider.width, entity.collider.height, context, barTop);
 }
 
-function drawBuildingSpriteOverlay(graphic: Graphics, entity: GameEntity, context: EntityRenderContext): void {
+function drawBuildingSpriteOverlay(graphic: Graphics, entity: GameEntity, context: EntityRenderContext, spriteTop: number): void {
   if (entity.collider.kind !== 'rect') return;
   const left = entity.x - entity.collider.width / 2;
   const top = entity.y - entity.collider.height / 2;
   const factionColor = factionPrimaryColor(entity);
   const factionHighlight = factionHighlightColor(entity);
-  graphic.roundRect(left + 12, top + 10, Math.max(44, entity.collider.width * 0.32), 12, 6).fill({ color: factionColor, alpha: 0.9 });
-  graphic.roundRect(left + 12, top + 10, Math.max(44, entity.collider.width * 0.32), 12, 6).stroke({ color: factionHighlight, width: 2.5, alpha: 0.96 });
-  graphic.circle(left + entity.collider.width - 18, top + 18, 7).fill({ color: factionHighlight, alpha: 0.98 });
+  // Small team pennant at the front-left corner instead of the old pill badge (read like a health bar).
+  const poleX = left + 10;
+  const poleBottom = entity.y + entity.collider.height * 0.48;
+  graphic.moveTo(poleX, poleBottom).lineTo(poleX, poleBottom - 30).stroke({ color: 0x1a1f22, width: 3, alpha: 0.9 });
+  graphic.poly([poleX + 1, poleBottom - 30, poleX + 19, poleBottom - 25, poleX + 1, poleBottom - 19]).fill({ color: factionColor, alpha: 0.95 });
+  graphic.poly([poleX + 1, poleBottom - 30, poleX + 19, poleBottom - 25, poleX + 1, poleBottom - 19]).stroke({ color: factionHighlight, width: 1, alpha: 0.7 });
   if ((entity.economy?.disabledSeconds ?? 0) > 0) {
     const phase = getRenderPolishState(entity, context.getDamageState).disabledPhase;
     graphic.roundRect(left - 8, top - 8, entity.collider.width + 16, entity.collider.height + 16, 20).stroke({ color: 0xffd166, width: 4 + (phase % 2), alpha: 0.68 + phase * 0.035 });
@@ -356,7 +431,7 @@ function drawBuildingSpriteOverlay(graphic: Graphics, entity: GameEntity, contex
     }
   }
   drawBuildingAnimation(graphic, entity, left, top, entity.collider.width, entity.collider.height, getRenderPolishState(entity, context.getDamageState));
-  drawDamageOverlay(graphic, entity, left, top, entity.collider.width, entity.collider.height, context);
+  drawDamageOverlay(graphic, entity, left, top, entity.collider.width, entity.collider.height, context, spriteTop + 6);
 }
 
 function drawBuildingEntity(graphic: Graphics, entity: GameEntity, context: EntityRenderContext): void {
@@ -570,9 +645,15 @@ function drawBuildingAnimation(
 ): void {
   const frame = entity.animation.frame;
   if (polish.hasProductionActivity) {
-    graphic.rect(left + 18, top + 16 + (polish.activityPhase % 2) * 6, width - 36, 6).fill({ color: 0xfff1a8, alpha: 0.46 });
-    graphic.circle(left + width - 38, top + 28, 7 + (polish.activityPhase % 2) * 3).fill({ color: 0xffd166, alpha: 0.48 });
-    graphic.rect(left + 28, top + height - 28, (width - 56) * (1 - polish.activityPhase / 6), 5).fill({ color: 0x87e0a5, alpha: 0.38 });
+    // Blinking work lamp + rotating gear tick: "this building is producing" without covering the art.
+    const lampX = left + width - 22;
+    const lampY = top + 14;
+    const lampOn = polish.activityPhase % 2 === 0;
+    graphic.circle(lampX, lampY, 11).fill({ color: 0xffd166, alpha: lampOn ? 0.22 : 0.08 });
+    graphic.circle(lampX, lampY, 5).fill({ color: lampOn ? 0xfff1a8 : 0xd69d34, alpha: 0.95 });
+    graphic.circle(lampX, lampY, 5).stroke({ color: 0x1a1f22, width: 1.5, alpha: 0.8 });
+    const spin = (polish.activityPhase / 5) * Math.PI * 2;
+    graphic.arc(lampX, lampY, 9, spin, spin + Math.PI * 0.7).stroke({ color: 0xfff1a8, width: 2, alpha: 0.7 });
   }
   if (polish.hasReelWorkshopActivity) {
     const progress = polish.reelWorkshopProgress ?? 0;
@@ -588,11 +669,25 @@ function drawBuildingAnimation(
   }
   if (polish.hasConstructionActivity) {
     const progress = polish.constructionProgress ?? 0;
-    graphic.rect(left + 12, top + height - 24, Math.max(12, (width - 24) * progress), 8).fill(0x87e0a5);
-    graphic.circle(left + width - 24, top + 18 + (frame % 3) * 5, 5).fill({ color: 0xffe08a, alpha: 0.88 });
-    graphic.moveTo(left + 18 + (frame % 5) * 9, top + height - 34).lineTo(left + 34 + (frame % 5) * 9, top + height - 48);
-    graphic.stroke({ color: 0xf6d48a, width: 4, alpha: 0.78 });
-    graphic.roundRect(left + width * 0.16, top + height * 0.45, width * 0.68 * progress, 9, 4).fill({ color: 0xfff1a8, alpha: 0.42 });
+    // Scaffold frame around the footprint plus a framed, striped progress bar under it.
+    graphic.roundRect(left + 4, top + 4, width - 8, height - 8, 6).stroke({ color: 0xf6d48a, width: 2, alpha: 0.38 });
+    for (let post = 0; post <= 4; post += 1) {
+      const postX = left + 8 + ((width - 16) * post) / 4;
+      graphic.moveTo(postX, top + height - 6).lineTo(postX, top + height - 6 - (height - 12) * clamp(progress * 1.4, 0.2, 1));
+    }
+    graphic.stroke({ color: 0xc9a46a, width: 2, alpha: 0.55 });
+    const barWidth = clamp(width * 0.72, 60, 150);
+    const barLeft = left + (width - barWidth) / 2;
+    const barTop = top + height + 8;
+    graphic.roundRect(barLeft - 2, barTop - 2, barWidth + 4, 11, 4).fill({ color: 0x050909, alpha: 0.8 });
+    graphic.roundRect(barLeft, barTop, Math.max(3, barWidth * progress), 7, 3).fill({ color: 0xf6c75a, alpha: 0.95 });
+    for (let stripe = 0; stripe < barWidth * progress - 6; stripe += 10) {
+      const stripeX = barLeft + stripe + ((frame * 2) % 10);
+      if (stripeX + 4 > barLeft + barWidth * progress) break;
+      graphic.moveTo(stripeX, barTop + 7).lineTo(stripeX + 4, barTop);
+    }
+    graphic.stroke({ color: 0x8a5a1c, width: 2, alpha: 0.45 });
+    graphic.circle(left + width - 24, top + 18 + (frame % 3) * 5, 4).fill({ color: 0xffe08a, alpha: 0.88 });
   }
   if (polish.hasDamageSmoke) {
     graphic.rect(left + 18 + (frame % 3) * 9, top + 12, 10, height - 24).fill({ color: 0x1b1614, alpha: 0.32 });
@@ -662,22 +757,28 @@ function drawDamageOverlay(
   width: number,
   height: number,
   context: EntityRenderContext,
+  barTop = top - 12,
 ): void {
   const damageState = context.getDamageState(entity);
-  if (!damageState || damageState === 'healthy') {
+  if (!damageState) {
     return;
   }
 
   const health = Math.max(0, entity.economy?.health ?? 0);
   const ratio = clamp(health / context.getMaxHealth(entity), 0, 1);
-  graphic.rect(left, top - 12, width, 7).fill({ color: 0x160f0d, alpha: 0.82 });
-  graphic.rect(left, top - 12, width * ratio, 7).fill(damageState === 'critical' || damageState === 'destroyed' ? 0xff6d4a : 0xffd166);
+  if (damageState === 'healthy' && ratio >= 0.999) {
+    return;
+  }
+  const isBuilding = entity.renderable.layer === 'buildings';
+  const barWidth = isBuilding ? clamp(width * 0.62, 56, 128) : clamp(width * 1.15, 30, 60);
+  drawHealthBar(graphic, left + width / 2, barTop, barWidth, ratio, isBuilding ? 7 : 5);
+  if (damageState === 'healthy') {
+    return;
+  }
 
   if (damageState === 'damaged' || damageState === 'critical') {
-    graphic.circle(left + width * 0.72, top - 22, damageState === 'critical' ? 11 : 7).fill({ color: 0x2a2926, alpha: 0.58 });
-    graphic.circle(left + width * 0.8, top - 34, damageState === 'critical' ? 7 : 4).fill({ color: 0x4a4a43, alpha: 0.42 });
     if (damageState === 'critical') {
-      graphic.roundRect(left - 6, top - 6, width + 12, height + 12, 12).stroke({ color: 0xff6d4a, width: 3, alpha: 0.42 });
+      graphic.roundRect(left - 6, top - 6, width + 12, height + 12, 12).stroke({ color: 0xff6d4a, width: 2, alpha: 0.32 });
     }
   }
 
@@ -976,14 +1077,15 @@ function drawCombatIndicators(graphic: Graphics, context: EntityRenderContext): 
     const tracerColor = entity.faction === 'enemy' ? 0xff8c6a : 0x8fd8ff;
     const ringColor = entity.faction === 'enemy' ? 0xffd7ce : 0xffefad;
 
+    // Short travelling tracer segment instead of a static laser line, plus a small impact glint.
+    const travel = ((entity.animation.frame % 4) + 1) / 4;
+    const segmentStart = Math.max(0, travel - 0.35);
+    graphic.moveTo(sourceX + (impactX - sourceX) * segmentStart, sourceY + (impactY - sourceY) * segmentStart);
+    graphic.lineTo(sourceX + (impactX - sourceX) * travel, sourceY + (impactY - sourceY) * travel);
+    graphic.stroke({ color: tracerColor, width: entity.kind === 'boat' ? 3 : 2, alpha: 0.75 });
     graphic.moveTo(sourceX, sourceY).lineTo(impactX, impactY);
-    graphic.stroke({ color: tracerColor, width: entity.kind === 'boat' ? 3.5 : 2.5, alpha: 0.34 + pulse * 0.16 });
-    graphic.circle(impactX, impactY, 4 + pulse * 2.2).fill({ color: ringColor, alpha: 0.34 + pulse * 0.18 });
-    graphic.circle(target.x, target.y - targetRadius * 0.14, targetRadius * (0.7 + pulse * 0.08)).stroke({
-      color: ringColor,
-      width: 2.5,
-      alpha: 0.38 + pulse * 0.16,
-    });
+    graphic.stroke({ color: tracerColor, width: 1, alpha: 0.14 });
+    graphic.circle(impactX, impactY, 3 + pulse * 2.2).fill({ color: ringColor, alpha: 0.3 + pulse * 0.25 });
   }
 }
 

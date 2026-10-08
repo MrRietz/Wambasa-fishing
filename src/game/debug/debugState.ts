@@ -21,6 +21,7 @@ import type { RenderPolishState } from '../render/renderPolishState';
 import { getRenderPolishState } from '../render/renderPolishState';
 import type { PlayerSettings } from '../settings/playerSettings';
 import type { AiObservedPlayerState, AiTactic } from '../ai/aiIntelSystem';
+import type { AiBrainDebugState } from '../ai/aiBrain';
 import type { FIRST_SKIRMISH_COMBAT_PRESSURE } from '../config/constants';
 
 export type AlertSeverity = 'info' | 'success' | 'warning' | 'error';
@@ -199,7 +200,7 @@ export interface RtsDebugState {
       threatId: string;
       threatCount: number;
     };
-  };
+  } & Partial<AiBrainDebugState>;
   lastResourceEvent?: {
     entityId: string;
     kind: 'metalLoaded' | 'metalUnloaded' | 'fishLoaded' | 'fishSold';

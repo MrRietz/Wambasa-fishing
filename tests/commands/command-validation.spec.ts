@@ -18,7 +18,10 @@ import {
 import { tickAiCoordinator, type AiControllerState } from '../../src/game/ai/aiCoordinator';
 import { updateAiDefenseResponse } from '../../src/game/ai/aiDefenseSystem';
 import { createCombatRuntime } from '../../src/app/runtime/combatRuntime';
-import { chooseScoutUnit, createAiIntelState, mergeObservedPlayerState, scanPlayerIntel, updateAdaptiveTactic } from '../../src/game/ai/aiIntelSystem';
+import { chooseScoutUnit, createAiIntelState, evaluateAiTactic, mergeObservedPlayerState, scanPlayerIntel, updateAdaptiveTactic, type AiTactic } from '../../src/game/ai/aiIntelSystem';
+import { createAiArmyState, updateAiArmy, type AiArmyInput, type AiArmyState } from '../../src/game/ai/aiArmy';
+import { AI_DIFFICULTY, AI_MEMORY_TUNING, AI_PERSONALITIES } from '../../src/game/ai/aiConfig';
+import { chooseAiTargetFromMemory, createAiMemoryState, findSighting, isEntityVisibleToRival, revealAttacker, summarizeAiMemory, updateAiPerception, type AiMemoryState } from '../../src/game/ai/aiMemory';
 import { chooseAiRaidAttacker, findAiTerritoryThreat } from '../../src/game/ai/aiPressureSystem';
 import { FIRST_SKIRMISH_COMBAT_PRESSURE } from '../../src/game/config/constants';
 import { buildingCatalog, type BuildingPlanKind } from '../../src/game/data/buildings';
@@ -27,6 +30,7 @@ import type { DamageState, EntityKind, Faction, GameEntity } from '../../src/gam
 import { createAttackBoatEntity, createBoatEntity, createEnemyAttackBoatEntity, createEnemyBoatEntity, createEnemyGuardEntity, createEnemyTruckEntity, createEnemyWorkerEntity, createGuardEntity, createTruckEntity, createWorkerEntity } from '../../src/game/entities/entityFactory';
 import { createSkirmishBootstrap } from '../../src/game/entities/skirmishSetup';
 import { createSaveGameSnapshot, parseSaveGameSnapshot, serializeSaveGameSnapshot } from '../../src/game/persistence/saveGame';
+import { resolveSpriteFacingPresentation } from '../../src/game/art/unitSpriteAssets';
 import { entityAnimationFrameCount, resolveAnimationAction } from '../../src/game/render/animationState';
 import { updateAutoDefenseSystem, updateCombatAttackers } from '../../src/game/simulation/systems/combatSystem';
 import { resolveMobileUnitOverlaps, updateTruckCrushSystem } from '../../src/game/simulation/systems/collisionSystem';
@@ -76,6 +80,13 @@ const tests: TestCase[] = [
       worker.movement.state = 'building';
 
       assert.equal(resolveAnimationAction(worker, () => 'healthy'), 'build');
+    },
+  },
+  {
+    name: 'humanoid west-facing presentation uses authored west art without double mirroring',
+    run: () => {
+      assert.deepEqual(resolveSpriteFacingPresentation('worker', 'west'), { textureDirection: 'west', flipX: false });
+      assert.deepEqual(resolveSpriteFacingPresentation('guard', 'west'), { textureDirection: 'east', flipX: false });
     },
   },
   {
@@ -1073,6 +1084,7 @@ const tests: TestCase[] = [
         },
       });
       const target = makeEntity({ id: 'enemy-1', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 900 } });
+      target.x = worker.x + 220;
       const output = executeAttackCommand({
         target,
         selectedUnits: [worker],
@@ -1112,6 +1124,7 @@ const tests: TestCase[] = [
     run: () => {
       const guard = makeEntity({ id: 'guard-1', kind: 'guard' });
       const target = makeEntity({ id: 'enemy-1', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 900 } });
+      target.x = guard.x + 260;
       const output = executeAttackCommand({
         target,
         selectedUnits: [guard],
@@ -1122,6 +1135,28 @@ const tests: TestCase[] = [
       assert.equal(output.result?.kind, 'attack');
       assert.equal(output.result?.reason, 'unreachable');
       assert.equal(guard.economy?.attack, undefined);
+    },
+  },
+  {
+    name: 'attack assigns an in-range target even when no movement route is available',
+    run: () => {
+      const guard = makeEntity({ id: 'guard-1', kind: 'guard' });
+      const skiff = makeEntity({ id: 'enemy-skiff', kind: 'boat', faction: 'enemy', economy: { health: 220 } });
+      skiff.x = guard.x + 82;
+
+      const output = executeAttackCommand({
+        target: skiff,
+        selectedUnits: [guard],
+        findLandPath: () => [],
+        findWaterPath: () => [],
+        getApproachPoint: targetPoint,
+      });
+
+      assert.equal(output.result?.ok, true);
+      assert.equal(output.result?.kind, 'attack');
+      assert.equal(guard.movement.state, 'idle');
+      assert.equal(guard.economy?.attack?.targetId, 'enemy-skiff');
+      assert.equal(guard.economy?.attack?.phase, 'attacking');
     },
   },
   {
@@ -1232,6 +1267,53 @@ const tests: TestCase[] = [
       assert.equal(guard.movement.state, 'moving');
       assert.equal(guard.economy?.attack?.phase, 'to-target');
       assert.equal(enemy.economy?.health, 85);
+    },
+  },
+  {
+    name: 'combat pursuit keeps an active path instead of recalculating every tick',
+    run: () => {
+      const guard = makeEntity({
+        id: 'guard-1',
+        kind: 'guard',
+        economy: {
+          attack: {
+            targetId: 'enemy-1',
+            phase: 'to-target',
+            damagePerSecond: FIRST_SKIRMISH_COMBAT_PRESSURE.guardDamagePerSecond,
+            range: FIRST_SKIRMISH_COMBAT_PRESSURE.guardLandAttackRange,
+          },
+        },
+      });
+      const enemy = makeEntity({ id: 'enemy-1', kind: 'worker', faction: 'enemy', economy: { health: 85 } });
+      enemy.x = guard.x + 180;
+      guard.path = [{ x: guard.x + 40, y: guard.y }, { x: enemy.x - 40, y: enemy.y }];
+      guard.moveTarget = guard.path[0];
+      guard.movement.state = 'moving';
+      let pathRequests = 0;
+
+      const output = updateCombatAttackers({
+        attackers: [guard],
+        entities: [guard, enemy],
+        deltaSeconds: 1,
+        getCollisionRadius: (entity) => entity.collider.kind === 'circle' ? entity.collider.radius : 40,
+        getApproachPoint: () => ({ x: enemy.x - 40, y: enemy.y }),
+        findLandPath: (_start, goal) => {
+          pathRequests += 1;
+          return [goal];
+        },
+        findEntityLandPath: (_entity, _start, goal) => {
+          pathRequests += 1;
+          return [goal];
+        },
+        findWaterPath: (_start, goal) => [goal],
+        applyDamage: testApplyDamage,
+      });
+
+      assert.equal(output.changed, false);
+      assert.equal(pathRequests, 0);
+      assert.equal(guard.movement.state, 'moving');
+      assert.equal(guard.economy?.attack?.targetId, 'enemy-1');
+      assert.equal(guard.economy?.attack?.phase, 'to-target');
     },
   },
   {
@@ -1773,45 +1855,17 @@ const tests: TestCase[] = [
     },
   },
   {
-    name: 'AI queues barracks guards before economy when both are affordable',
+    name: 'AI economy planner adds a second hauler before guards and keeps buying cash-only workers while metal is reserved',
     run: () => {
-      const state = makeAiControllerState({
-        openingComplete: true,
-        productionQueued: false,
-        barracksProductionQueued: false,
-      });
-      const queued: string[] = [];
-      const changed = tickAiCoordinator({
-        deltaSeconds: 0.1,
-        state,
-        entities: [
-          makeEntity({ id: 'enemy-factory', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 1200 } }),
-          makeEntity({ id: 'enemy-barracks', kind: 'barracks', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 700 } }),
-          makeEntity({ id: 'enemy-worker-1', kind: 'worker', faction: 'enemy' }),
-          makeEntity({ id: 'enemy-worker-2', kind: 'worker', faction: 'enemy' }),
-          makeEntity({ id: 'enemy-worker-3', kind: 'worker', faction: 'enemy' }),
-          makeEntity({ id: 'enemy-truck-1', kind: 'truck', faction: 'enemy' }),
-        ],
-        availableMetal: 240,
-        availableCash: 100,
-        getDamageState: () => 'healthy',
-        tryIssueHarvest: () => false,
-        queueProduction: (product) => {
-          queued.push(product);
-          return true;
-        },
-        buildDock: () => false,
-        buildBarracks: () => false,
-        updateProduction: () => false,
-        updateFishing: () => false,
-        updateBoatRepair: () => false,
-        respondToThreat: () => false,
-        issueRaid: () => false,
-        updateRaid: () => false,
-      });
-
-      assert.equal(changed, true);
-      assert.deepEqual(queued, ['guard']);
+      const queued = runAiEconomyTick({ metal: 240, cash: 100 });
+      assert.deepEqual(queued, ['truck', 'worker']);
+    },
+  },
+  {
+    name: 'AI economy planner queues guards first when the home base is threatened',
+    run: () => {
+      const queued = runAiEconomyTick({ metal: 240, cash: 100, demand: { guard: 2 } });
+      assert.equal(queued[0], 'guard');
     },
   },
   {
@@ -2265,6 +2319,185 @@ const tests: TestCase[] = [
       assert.equal(result, undefined);
     },
   },
+  {
+    name: 'AI memory only records player entities inside rival vision and never targets unseen assets',
+    run: () => {
+      const memory = createAiMemoryState();
+      const rivalGuard = placeEntity(makeEntity({ id: 'enemy-guard-1', kind: 'guard', faction: 'enemy', economy: { health: 160 } }), 4000, 1000);
+      const seenTruck = placeEntity(makeEntity({ id: 'truck-near', kind: 'truck', economy: { health: 140 } }), 4200, 1000);
+      const unseenTruck = placeEntity(makeEntity({ id: 'truck-far', kind: 'truck', economy: { health: 140 } }), 600, 1000);
+      const entities = [rivalGuard, seenTruck, unseenTruck];
+
+      const result = updateAiPerception({ entities, memory, now: 1, getDamageState: testGetDamageState });
+
+      assert.equal(result.visible, 1);
+      assert.deepEqual(memory.sightings.map((sighting) => sighting.id), ['truck-near']);
+      assert.equal(isEntityVisibleToRival(entities, unseenTruck, testGetDamageState), false);
+      assert.equal(chooseAiTargetFromMemory({ memory, now: 1, origin: rivalGuard, preferredKinds: ['truck'] })?.id, 'truck-near');
+      assert.equal(
+        chooseAiTargetFromMemory({ memory, now: 1, origin: rivalGuard, preferredKinds: ['truck'], accept: (sighting) => sighting.id === 'truck-far' }),
+        undefined,
+      );
+    },
+  },
+  {
+    name: 'AI army asks for intel instead of attacking unseen player assets, then marches on the remembered position',
+    run: () => {
+      const memory = createAiMemoryState();
+      const factory = placeEntity(makeEntity({ id: 'enemy-factory', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 1500 } }), 6000, 900);
+      const guards = [1, 2, 3, 4, 5, 6, 7, 8].map((index) =>
+        placeEntity(makeEntity({ id: `enemy-guard-${index}`, kind: 'guard', faction: 'enemy', economy: { health: 160 } }), 5600 + index * 20, 900),
+      );
+      const playerTruck = placeEntity(makeEntity({ id: 'truck-1', kind: 'truck', economy: { health: 140 } }), 600, 1000);
+      const entities: GameEntity[] = [factory, ...guards, playerTruck];
+      const state = createAiArmyState(0);
+
+      updateAiPerception({ entities, memory, now: 100, getDamageState: testGetDamageState });
+      const blind = updateAiArmy(makeArmyInput({ state, memory, entities, now: 100, tactic: 'probeEconomy' }));
+      assert.equal(state.mode, 'gather');
+      assert.equal(state.waveCount, 0);
+      assert.equal(blind.needsIntel, true);
+      assert.equal(guards.some((guard) => guard.economy?.attack), false);
+
+      // A scout sees the truck once; the truck then drives on through fog.
+      const scout = placeEntity(makeEntity({ id: 'enemy-worker-9', kind: 'worker', faction: 'enemy', economy: { health: 85 } }), 700, 1000);
+      entities.push(scout);
+      updateAiPerception({ entities, memory, now: 101, getDamageState: testGetDamageState });
+      entities.pop();
+      playerTruck.x = 1500;
+      updateAiPerception({ entities, memory, now: 102, getDamageState: testGetDamageState });
+
+      const marches: Array<{ id: string; x: number; targetId?: string }> = [];
+      updateAiArmy(makeArmyInput({
+        state,
+        memory,
+        entities,
+        now: 102,
+        tactic: 'probeEconomy',
+        attackRemembered: (unit, objective) => {
+          marches.push({ id: unit.id, x: objective.x, targetId: objective.targetId });
+          return true;
+        },
+      }));
+
+      assert.equal(state.mode, 'attack');
+      assert.equal(state.objective?.targetId, 'truck-1');
+      assert.equal(state.objective?.x, 600);
+      assert.ok(marches.length >= 2);
+      assert.ok(marches.every((march) => march.targetId === 'truck-1' && Math.abs(march.x - 600) <= 60));
+    },
+  },
+  {
+    name: 'AI memory decays stale mobile sightings and clears re-scouted empty spots',
+    run: () => {
+      const memory = createAiMemoryState();
+      const scout = placeEntity(makeEntity({ id: 'enemy-worker-1', kind: 'worker', faction: 'enemy', economy: { health: 85 } }), 1000, 1000);
+      const truck = placeEntity(makeEntity({ id: 'truck-1', kind: 'truck', economy: { health: 140 } }), 1100, 1000);
+      const dock = placeEntity(makeEntity({ id: 'player-dock', kind: 'dock', speed: 0, layer: 'buildings', economy: { health: 760 } }), 1150, 1080);
+      const entities: GameEntity[] = [scout, truck, dock];
+      updateAiPerception({ entities, memory, now: 0, getDamageState: testGetDamageState });
+      assert.equal(memory.sightings.length, 2);
+
+      // Scout leaves; truck drives off. The memory keeps the last known spots.
+      scout.x = 4000;
+      truck.x = 3000;
+      updateAiPerception({ entities, memory, now: 10, getDamageState: testGetDamageState });
+      assert.equal(findSighting(memory, 'truck-1')?.x, 1100);
+      assert.ok(findSighting(memory, 'player-dock'));
+
+      // Mobile sightings expire; buildings stay.
+      updateAiPerception({ entities, memory, now: 10 + AI_MEMORY_TUNING.mobileSightingTtlSeconds + 1, getDamageState: testGetDamageState });
+      assert.equal(findSighting(memory, 'truck-1'), undefined);
+      assert.ok(findSighting(memory, 'player-dock'));
+
+      // Re-scouting the dock spot after it was destroyed clears the stale building sighting.
+      dock.economy = { ...dock.economy, health: 0 };
+      scout.x = 1120;
+      scout.y = 1040;
+      const rescout = updateAiPerception({ entities, memory, now: 80, getDamageState: testGetDamageState });
+      assert.equal(rescout.cleared, 1);
+      assert.equal(findSighting(memory, 'player-dock'), undefined);
+    },
+  },
+  {
+    name: 'AI damage reveal remembers an unseen attacker',
+    run: () => {
+      const memory = createAiMemoryState();
+      const attacker = placeEntity(makeEntity({ id: 'guard-1', kind: 'guard', economy: { health: 170 } }), 2000, 900);
+      const tower = placeEntity(makeEntity({ id: 'enemy-guard-tower', kind: 'guardTower', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 520 } }), 6000, 900);
+      updateAiPerception({ entities: [attacker, tower], memory, now: 3, getDamageState: testGetDamageState });
+      assert.equal(memory.sightings.length, 0);
+
+      revealAttacker(memory, attacker, 4);
+
+      assert.equal(findSighting(memory, 'guard-1')?.source, 'damage');
+      assert.equal(findSighting(memory, 'guard-1')?.x, 2000);
+    },
+  },
+  {
+    name: 'AI tactic adapts to scouted memory: avoids heavy defenses, all-ins weak bases, defends and counter-attacks',
+    run: () => {
+      const personality = AI_PERSONALITIES.turtleSiege;
+      const memory = createAiMemoryState();
+      const scout = placeEntity(makeEntity({ id: 'enemy-worker-1', kind: 'worker', faction: 'enemy', economy: { health: 85 } }), 800, 820);
+      const factory = placeEntity(makeEntity({ id: 'player-factory', kind: 'factory', speed: 0, layer: 'buildings', economy: { health: 1500 } }), 767, 825);
+      const truck = placeEntity(makeEntity({ id: 'truck-1', kind: 'truck', economy: { health: 140 } }), 600, 900);
+      const towers = [0, 1].map((index) =>
+        placeEntity(makeEntity({ id: `guard-tower-${index}`, kind: 'guardTower', speed: 0, layer: 'buildings', economy: { health: 520 } }), 700 + index * 120, 760),
+      );
+      const guards = [0, 1, 2].map((index) => placeEntity(makeEntity({ id: `guard-${index}`, kind: 'guard', economy: { health: 170 } }), 820 + index * 20, 900));
+      const context = { personality, ownArmyStrength: 5, threatAtHome: 0, secondsSinceRepelled: Number.POSITIVE_INFINITY, avoidBase: false, desiredWaveSize: 6 };
+
+      updateAiPerception({ entities: [scout, factory, truck, ...towers, ...guards], memory, now: 50, getDamageState: testGetDamageState });
+      const heavy = evaluateAiTactic({ ...context, observed: summarizeAiMemory(memory, 50) });
+      assert.equal(heavy.tactic, 'probeEconomy');
+      assert.match(heavy.reason, /heavy defenses/);
+
+      const weakMemory = createAiMemoryState();
+      updateAiPerception({ entities: [scout, factory, truck], memory: weakMemory, now: 50, getDamageState: testGetDamageState });
+      const weak = evaluateAiTactic({ ...context, ownArmyStrength: 6, observed: summarizeAiMemory(weakMemory, 50) });
+      assert.equal(weak.tactic, 'allIn');
+
+      assert.equal(evaluateAiTactic({ ...context, threatAtHome: 2, observed: summarizeAiMemory(weakMemory, 50) }).tactic, 'defending');
+      assert.equal(evaluateAiTactic({ ...context, secondsSinceRepelled: 5, ownArmyStrength: 3, observed: summarizeAiMemory(weakMemory, 50) }).tactic, 'counterAttack');
+      assert.equal(evaluateAiTactic({ ...context, observed: summarizeAiMemory(createAiMemoryState(), 50) }).tactic, 'scouting');
+    },
+  },
+  {
+    name: 'enemy territory threat ignores player units outside rival vision',
+    run: () => {
+      const factory = placeEntity(makeEntity({ id: 'enemy-factory', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 1500 } }), 6000, 900);
+      const guard = placeEntity(makeEntity({ id: 'guard-1', kind: 'guard', economy: { health: 170 } }), 6000 - 900, 900);
+
+      assert.equal(findAiTerritoryThreat([factory, guard], () => 'healthy'), null);
+      guard.x = 6000 - 400;
+      assert.deepEqual(findAiTerritoryThreat([factory, guard], () => 'healthy'), { threatId: 'guard-1', attackedAssetId: 'enemy-factory' });
+    },
+  },
+  {
+    name: 'AI army retreats an outmatched wave and regroups',
+    run: () => {
+      const memory = createAiMemoryState();
+      const factory = placeEntity(makeEntity({ id: 'enemy-factory', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 1500 } }), 6000, 900);
+      const squad = [1, 2].map((index) => placeEntity(makeEntity({ id: `enemy-guard-${index}`, kind: 'guard', faction: 'enemy', economy: { health: 160 } }), 1000 + index * 20, 1000));
+      const defenders = [1, 2, 3, 4].map((index) => placeEntity(makeEntity({ id: `guard-${index}`, kind: 'guard', economy: { health: 170 } }), 1150 + index * 15, 1000));
+      const entities: GameEntity[] = [factory, ...squad, ...defenders];
+      const state = createAiArmyState(0);
+      state.mode = 'attack';
+      state.squadIds.push(...squad.map((unit) => unit.id));
+      state.startStrength = 2;
+      state.objective = { x: 900, y: 1000, label: 'test objective' };
+      updateAiPerception({ entities, memory, now: 60, getDamageState: testGetDamageState });
+
+      const output = updateAiArmy(makeArmyInput({ state, memory, entities, now: 60, tactic: 'baseSiege' }));
+
+      assert.equal(state.mode, 'retreat');
+      assert.equal(state.retreatCount, 1);
+      assert.match(state.lastRetreatReason ?? '', /outmatched/);
+      assert.ok(output.events.some((event) => event.kind === 'retreat'));
+      assert.ok(state.nextWaveAt > 60);
+    },
+  },
 ];
 
 for (const test of tests) {
@@ -2360,6 +2593,88 @@ function makeFishingZone(input: { id: string; label?: string; amount: number }) 
     depletedCooldownSeconds: 0,
     cashPerFish: 2,
     tier: 'safe' as const,
+  };
+}
+
+function runAiEconomyTick(input: { metal: number; cash: number; demand?: Partial<Record<'guard' | 'truck' | 'worker', number>> }): string[] {
+  const state = makeAiControllerState({ openingComplete: true });
+  const queued: string[] = [];
+  tickAiCoordinator({
+    deltaSeconds: 0.1,
+    state,
+    entities: [
+      makeEntity({ id: 'enemy-factory', kind: 'enemyFactory', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 1200 } }),
+      makeEntity({ id: 'enemy-barracks', kind: 'barracks', faction: 'enemy', speed: 0, layer: 'buildings', economy: { health: 700 } }),
+      makeEntity({ id: 'enemy-worker-1', kind: 'worker', faction: 'enemy' }),
+      makeEntity({ id: 'enemy-worker-2', kind: 'worker', faction: 'enemy' }),
+      makeEntity({ id: 'enemy-worker-3', kind: 'worker', faction: 'enemy' }),
+      makeEntity({ id: 'enemy-truck-1', kind: 'truck', faction: 'enemy' }),
+    ],
+    availableMetal: input.metal,
+    availableCash: input.cash,
+    getDamageState: () => 'healthy',
+    tryIssueHarvest: () => false,
+    queueProduction: (product) => {
+      queued.push(product);
+      return true;
+    },
+    buildDock: () => false,
+    buildBarracks: () => false,
+    updateProduction: () => false,
+    updateFishing: () => false,
+    updateBoatRepair: () => false,
+    respondToThreat: () => false,
+    issueRaid: () => false,
+    updateRaid: () => false,
+    demand: input.demand,
+  });
+  return queued;
+}
+
+function placeEntity(entity: GameEntity, x: number, y: number): GameEntity {
+  entity.x = x;
+  entity.y = y;
+  return entity;
+}
+
+function makeArmyInput(input: {
+  state: AiArmyState;
+  memory: AiMemoryState;
+  entities: GameEntity[];
+  now: number;
+  tactic: AiTactic;
+  attackRemembered?: AiArmyInput['attackRemembered'];
+}): AiArmyInput {
+  const entityById = new Map(input.entities.map((entity) => [entity.id, entity]));
+  const home = input.entities.find((entity) => entity.kind === 'enemyFactory') ?? { x: 6000, y: 900 };
+  return {
+    state: input.state,
+    memory: input.memory,
+    now: input.now,
+    entities: input.entities,
+    entityById,
+    personality: AI_PERSONALITIES.turtleSiege,
+    difficulty: AI_DIFFICULTY.normal,
+    tactic: input.tactic,
+    home: { x: home.x, y: home.y },
+    rally: { x: home.x - 400, y: home.y },
+    reservedIds: new Set<string>(),
+    getDamageState: testGetDamageState,
+    getMaxHealth: () => 160,
+    moveLand: (unit, point) => {
+      unit.path = [point];
+      unit.moveTarget = point;
+      unit.movement.state = 'moving';
+      return true;
+    },
+    moveWater: () => false,
+    waterPointNear: () => undefined,
+    isLandReachable: () => true,
+    attack: (unit, target) => {
+      unit.economy = { ...unit.economy, attack: { targetId: target.id, phase: 'to-target', damagePerSecond: 30, range: 90 } };
+      return true;
+    },
+    attackRemembered: input.attackRemembered ?? (() => true),
   };
 }
 

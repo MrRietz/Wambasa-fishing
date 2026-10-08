@@ -48,6 +48,12 @@ export interface CreateCombatRuntimeOptions {
   guardTowerDamagePerSecond: number;
   findGuardTowerTarget: (tower: GameEntity) => GameEntity | undefined;
   isVisibleToPlayer?: (entity: GameEntity) => boolean;
+  /** Fog-honest pursuit for rival attackers (defaults to always). */
+  canRivalPursue?: (attacker: GameEntity, target: GameEntity) => boolean;
+  /** A player entity damaged a rival asset (damage reveal for AI memory). */
+  onRivalAttacked?: (attackerId: string, targetId: string) => void;
+  /** Only assets near the rival base trigger the defense controller (a scout shot far away just flees). */
+  shouldRivalDefend?: (attackedAssetId: string) => boolean;
 }
 
 export interface CombatRuntime {
@@ -61,13 +67,24 @@ export interface CombatRuntime {
 }
 
 export function createCombatRuntime(options: CreateCombatRuntimeOptions): CombatRuntime {
+  // Reused every frame: rival combat now runs continuously (not only during raids), so avoid per-frame allocations.
+  const raidAttackers: GameEntity[] = [];
+
   function updateAiRaidActive(deltaSeconds: number, layers: RenderLayers): boolean {
-    const raidAttackers = options.entities.filter(
-      (entity) =>
-        entity.faction === 'enemy' &&
-        entity.economy?.attack &&
-        options.entities.some((candidate) => candidate.id === entity.economy?.attack?.targetId && candidate.faction === 'player'),
-    );
+    raidAttackers.length = 0;
+    for (const entity of options.entities) {
+      // Mobile rival attackers only; towers are resolved by the guard tower system.
+      if (entity.faction === 'enemy' && entity.economy?.attack && entity.movement.speed > 0) {
+        raidAttackers.push(entity);
+      }
+    }
+    if (raidAttackers.length === 0) {
+      if (options.aiController.raidIssued) {
+        options.aiController.raidIssued = false;
+        options.aiController.raidDelaySeconds = options.getAiRepeatRaidDelaySeconds();
+      }
+      return false;
+    }
     const output = updateCombatAttackers({
       attackers: raidAttackers,
       entities: options.entities,
@@ -78,6 +95,7 @@ export function createCombatRuntime(options: CreateCombatRuntimeOptions): Combat
       findEntityLandPath: options.findEntityLandPath,
       findWaterPath: options.findWaterPath,
       applyDamage: options.applyDamage,
+      canPursue: options.canRivalPursue,
     });
 
     for (const event of output.events) {
@@ -120,12 +138,7 @@ export function createCombatRuntime(options: CreateCombatRuntimeOptions): Combat
       options.updateSelectionReadout();
       options.publishDebugState(layers);
     }
-    const hasActiveRaid = options.entities.some(
-      (entity) =>
-        entity.faction === 'enemy' &&
-        Boolean(entity.economy?.attack) &&
-        options.entities.some((candidate) => candidate.id === entity.economy?.attack?.targetId && candidate.faction === 'player'),
-    );
+    const hasActiveRaid = raidAttackers.some((entity) => Boolean(entity.economy?.attack));
     if (!hasActiveRaid && options.aiController.raidIssued) {
       options.aiController.raidIssued = false;
       options.aiController.raidDelaySeconds = options.getAiRepeatRaidDelaySeconds();
@@ -246,6 +259,10 @@ export function createCombatRuntime(options: CreateCombatRuntimeOptions): Combat
   }
 
   function issueAiDefenseResponse(threatId: string, attackedAssetId: string, layers: RenderLayers): boolean {
+    options.onRivalAttacked?.(threatId, attackedAssetId);
+    if (options.shouldRivalDefend && !options.shouldRivalDefend(attackedAssetId)) {
+      return false;
+    }
     const output = runAiDefenseController({
       entities: options.entities,
       threatId,

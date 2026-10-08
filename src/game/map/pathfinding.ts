@@ -6,136 +6,202 @@ interface PathNode {
   y: number;
   g: number;
   f: number;
-  parent?: string;
+  /** First time this cell entered the open set; breaks f ties exactly like Map insertion order did. */
+  seq: number;
+  parent?: PathNode;
+  open: boolean;
+}
+
+interface HeapEntry {
+  node: PathNode;
+  f: number;
 }
 
 export type WalkableWorldPointPredicate = (worldX: number, worldY: number) => boolean;
 
+const MAX_CELL_X = Math.floor((WORLD_WIDTH - 1) / PATH_CELL_SIZE);
+const MAX_CELL_Y = Math.floor((WORLD_HEIGHT - 1) / PATH_CELL_SIZE);
+// Cells are keyed numerically (no per-lookup strings). One padding cell on each side covers the
+// out-of-world neighbours of edge cells; anything further out falls back to an uncached predicate call.
+const KEY_STRIDE = MAX_CELL_X + 3;
+const KEY_ROWS = MAX_CELL_Y + 3;
+const NEIGHBOR_DX = [-1, 1, 0, 0, -1, 1, -1, 1];
+const NEIGHBOR_DY = [0, 0, -1, 1, -1, -1, 1, 1];
+
+/**
+ * A* over the path grid.
+ *
+ * Search order is identical to the original Map-based implementation (lowest f first, ties resolved
+ * by the order cells first entered the open set), but the open set is a binary heap, cells use numeric
+ * keys and walkability is memoised per search. The old version spread the whole open set into a new
+ * array on every expansion, which made a single unreachable move order allocate hundreds of MB.
+ */
 export function findGridPath(
   start: { x: number; y: number },
   goal: { x: number; y: number },
   isWalkableWorldPoint: WalkableWorldPointPredicate,
 ): Array<{ x: number; y: number }> {
-  const pathNodeCache = new Map<string, PathNode>();
-  const startCell = worldToPathCell(start);
-  const goalCell = worldToPathCell(goal);
+  const startX = worldToPathCellX(start.x);
+  const startY = worldToPathCellY(start.y);
+  const goalX = worldToPathCellX(goal.x);
+  const goalY = worldToPathCellY(goal.y);
 
-  if (!isWalkablePathCell(startCell.x, startCell.y, isWalkableWorldPoint) || !isWalkablePathCell(goalCell.x, goalCell.y, isWalkableWorldPoint)) {
+  // 0 = unknown, 1 = walkable, 2 = blocked. The predicate is pure for the duration of one search.
+  const walkable = new Uint8Array(KEY_STRIDE * KEY_ROWS);
+  const isWalkableCell = (cellX: number, cellY: number): boolean => {
+    const key = cellKey(cellX, cellY);
+    if (key < 0) {
+      return isWalkableWorldPoint(cellToWorld(cellX), cellToWorld(cellY));
+    }
+    const cached = walkable[key];
+    if (cached !== 0) {
+      return cached === 1;
+    }
+    const result = isWalkableWorldPoint(cellToWorld(cellX), cellToWorld(cellY));
+    walkable[key] = result ? 1 : 2;
+    return result;
+  };
+
+  if (!isWalkableCell(startX, startY) || !isWalkableCell(goalX, goalY)) {
     return [];
   }
 
-  const open = new Map<string, PathNode>();
-  const closed = new Set<string>();
-  const startKey = pathCellKey(startCell.x, startCell.y);
-  const startNode = { ...startCell, g: 0, f: pathHeuristic(startCell, goalCell) };
-  open.set(startKey, startNode);
-  pathNodeCache.set(startKey, startNode);
+  const nodes = new Map<number, PathNode>();
+  const closed = new Set<number>();
+  const heap: HeapEntry[] = [];
+  let seq = 0;
 
-  while (open.size > 0) {
-    const current = [...open.values()].reduce((best, candidate) => (candidate.f < best.f ? candidate : best));
-    const currentKey = pathCellKey(current.x, current.y);
-    open.delete(currentKey);
-    closed.add(currentKey);
+  const startNode: PathNode = { x: startX, y: startY, g: 0, f: pathHeuristic(startX, startY, goalX, goalY), seq: seq++, open: true };
+  nodes.set(packKey(startX, startY), startNode);
+  heapPush(heap, { node: startNode, f: startNode.f });
+  let openCount = 1;
 
-    if (current.x === goalCell.x && current.y === goalCell.y) {
-      return reconstructPath(current, pathNodeCache).concat(goal);
+  while (openCount > 0) {
+    const entry = heapPop(heap);
+    if (!entry) break;
+    const current = entry.node;
+    // Lazy deletion: skip stale heap entries left behind when a node's f improved.
+    if (!current.open || entry.f !== current.f) continue;
+    current.open = false;
+    openCount -= 1;
+    closed.add(packKey(current.x, current.y));
+
+    if (current.x === goalX && current.y === goalY) {
+      return reconstructPath(current).concat(goal);
     }
 
-    for (const neighbor of pathNeighbors(current.x, current.y)) {
-      const neighborKey = pathCellKey(neighbor.x, neighbor.y);
+    for (let direction = 0; direction < 8; direction += 1) {
+      const neighborX = current.x + NEIGHBOR_DX[direction];
+      const neighborY = current.y + NEIGHBOR_DY[direction];
+      const neighborKey = packKey(neighborX, neighborY);
+      const diagonal = direction >= 4;
       if (
         closed.has(neighborKey) ||
-        !isWalkablePathCell(neighbor.x, neighbor.y, isWalkableWorldPoint) ||
-        !canTraverseNeighbor(current, neighbor, isWalkableWorldPoint)
+        !isWalkableCell(neighborX, neighborY) ||
+        (diagonal && !(isWalkableCell(current.x, neighborY) && isWalkableCell(neighborX, current.y)))
       ) {
         continue;
       }
 
-      const movementCost = neighbor.x !== current.x && neighbor.y !== current.y ? Math.SQRT2 : 1;
-      const g = current.g + movementCost;
-      const existing = open.get(neighborKey);
-      if (existing && g >= existing.g) {
+      const g = current.g + (diagonal ? Math.SQRT2 : 1);
+      const existing = nodes.get(neighborKey);
+      if (existing?.open && g >= existing.g) {
         continue;
       }
 
-      const neighborNode = {
-        x: neighbor.x,
-        y: neighbor.y,
-        g,
-        f: g + pathHeuristic(neighbor, goalCell),
-        parent: currentKey,
-      };
-      open.set(neighborKey, neighborNode);
-      pathNodeCache.set(neighborKey, neighborNode);
+      const f = g + pathHeuristic(neighborX, neighborY, goalX, goalY);
+      if (existing?.open) {
+        existing.g = g;
+        existing.f = f;
+        existing.parent = current;
+        heapPush(heap, { node: existing, f });
+        continue;
+      }
+      const neighborNode: PathNode = { x: neighborX, y: neighborY, g, f, seq: seq++, parent: current, open: true };
+      nodes.set(neighborKey, neighborNode);
+      heapPush(heap, { node: neighborNode, f });
+      openCount += 1;
     }
   }
 
   return [];
 }
 
-function reconstructPath(endNode: PathNode, pathNodeCache: Map<string, PathNode>): Array<{ x: number; y: number }> {
+function reconstructPath(endNode: PathNode): Array<{ x: number; y: number }> {
   const cells: Array<{ x: number; y: number }> = [];
   let cursor: PathNode | undefined = endNode;
-  while (cursor) {
-    cells.unshift({ x: cursor.x, y: cursor.y });
-    cursor = cursor.parent ? pathNodeCache.get(cursor.parent) : undefined;
+  while (cursor?.parent) {
+    cells.push({ x: cellToWorld(cursor.x), y: cellToWorld(cursor.y) });
+    cursor = cursor.parent;
   }
-
-  return cells.slice(1).map(pathCellToWorld);
+  return cells.reverse();
 }
 
-function isWalkablePathCell(cellX: number, cellY: number, isWalkableWorldPoint: WalkableWorldPointPredicate): boolean {
-  const point = pathCellToWorld({ x: cellX, y: cellY });
-  return isWalkableWorldPoint(point.x, point.y);
+function worldToPathCellX(worldX: number): number {
+  return clamp(Math.floor(worldX / PATH_CELL_SIZE), 0, MAX_CELL_X);
 }
 
-function worldToPathCell(point: { x: number; y: number }): { x: number; y: number } {
-  return {
-    x: clamp(Math.floor(point.x / PATH_CELL_SIZE), 0, Math.floor((WORLD_WIDTH - 1) / PATH_CELL_SIZE)),
-    y: clamp(Math.floor(point.y / PATH_CELL_SIZE), 0, Math.floor((WORLD_HEIGHT - 1) / PATH_CELL_SIZE)),
-  };
+function worldToPathCellY(worldY: number): number {
+  return clamp(Math.floor(worldY / PATH_CELL_SIZE), 0, MAX_CELL_Y);
 }
 
-function pathCellToWorld(cell: { x: number; y: number }): { x: number; y: number } {
-  return {
-    x: cell.x * PATH_CELL_SIZE + PATH_CELL_SIZE / 2,
-    y: cell.y * PATH_CELL_SIZE + PATH_CELL_SIZE / 2,
-  };
+function cellToWorld(cell: number): number {
+  return cell * PATH_CELL_SIZE + PATH_CELL_SIZE / 2;
 }
 
-function pathCellKey(x: number, y: number): string {
-  return `${x},${y}`;
-}
-
-function pathHeuristic(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-function pathNeighbors(x: number, y: number): Array<{ x: number; y: number }> {
-  return [
-    { x: x - 1, y },
-    { x: x + 1, y },
-    { x, y: y - 1 },
-    { x, y: y + 1 },
-    { x: x - 1, y: y - 1 },
-    { x: x + 1, y: y - 1 },
-    { x: x - 1, y: y + 1 },
-    { x: x + 1, y: y + 1 },
-  ];
-}
-
-function canTraverseNeighbor(
-  current: { x: number; y: number },
-  neighbor: { x: number; y: number },
-  isWalkableWorldPoint: WalkableWorldPointPredicate,
-): boolean {
-  const diagonal = current.x !== neighbor.x && current.y !== neighbor.y;
-  if (!diagonal) {
-    return true;
+/** Index into the padded walkability grid, or -1 when the cell lies outside it. */
+function cellKey(cellX: number, cellY: number): number {
+  if (cellX < -1 || cellY < -1 || cellX > MAX_CELL_X + 1 || cellY > MAX_CELL_Y + 1) {
+    return -1;
   }
+  return (cellY + 1) * KEY_STRIDE + cellX + 1;
+}
 
-  return (
-    isWalkablePathCell(current.x, neighbor.y, isWalkableWorldPoint) &&
-    isWalkablePathCell(neighbor.x, current.y, isWalkableWorldPoint)
-  );
+/** Collision-free numeric key for any integer cell (searches never stray far outside the grid). */
+function packKey(cellX: number, cellY: number): number {
+  return (cellY + 0x8000) * 0x10000 + (cellX + 0x8000);
+}
+
+function pathHeuristic(ax: number, ay: number, bx: number, by: number): number {
+  return Math.hypot(ax - bx, ay - by);
+}
+
+function isBefore(a: HeapEntry, b: HeapEntry): boolean {
+  return a.f < b.f || (a.f === b.f && a.node.seq < b.node.seq);
+}
+
+function heapPush(heap: HeapEntry[], entry: HeapEntry): void {
+  heap.push(entry);
+  let index = heap.length - 1;
+  while (index > 0) {
+    const parentIndex = (index - 1) >> 1;
+    if (!isBefore(heap[index], heap[parentIndex])) break;
+    const swap = heap[parentIndex];
+    heap[parentIndex] = heap[index];
+    heap[index] = swap;
+    index = parentIndex;
+  }
+}
+
+function heapPop(heap: HeapEntry[]): HeapEntry | undefined {
+  const top = heap[0];
+  const last = heap.pop();
+  if (heap.length === 0 || !last) {
+    return top;
+  }
+  heap[0] = last;
+  let index = 0;
+  for (;;) {
+    const left = index * 2 + 1;
+    const right = left + 1;
+    let smallest = index;
+    if (left < heap.length && isBefore(heap[left], heap[smallest])) smallest = left;
+    if (right < heap.length && isBefore(heap[right], heap[smallest])) smallest = right;
+    if (smallest === index) break;
+    const swap = heap[smallest];
+    heap[smallest] = heap[index];
+    heap[index] = swap;
+    index = smallest;
+  }
+  return top;
 }
