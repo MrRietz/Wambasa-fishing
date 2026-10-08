@@ -46,6 +46,9 @@ export function updateTruckCrushSystem(input: TruckCrushSystemInput): TruckCrush
     const target = input.entities.find(
       (entity) =>
         entity.id !== truck.id &&
+        // Like Red Alert: trucks only run over hostile infantry; your own workers are never crushed.
+        entity.faction !== truck.faction &&
+        entity.faction !== 'neutral' &&
         isCrushVulnerableHuman(entity) &&
         (entity.economy?.health ?? 0) > 0 &&
         entitiesOverlap(truck, entity),

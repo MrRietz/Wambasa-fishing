@@ -235,7 +235,8 @@ const minimapDrawingContext = minimapContext;
 
 const camera: CameraState = {
   x: 300,
-  y: 220,
+  // Start low enough that the home base (factory, workers, truck, metal) sits above the bottom command bar.
+  y: 400,
   zoom: DEFAULT_ZOOM,
 };
 

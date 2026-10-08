@@ -41,10 +41,10 @@ export function findGridPath(
   goal: { x: number; y: number },
   isWalkableWorldPoint: WalkableWorldPointPredicate,
 ): Array<{ x: number; y: number }> {
-  const startX = worldToPathCellX(start.x);
-  const startY = worldToPathCellY(start.y);
-  const goalX = worldToPathCellX(goal.x);
-  const goalY = worldToPathCellY(goal.y);
+  let startX = worldToPathCellX(start.x);
+  let startY = worldToPathCellY(start.y);
+  let goalX = worldToPathCellX(goal.x);
+  let goalY = worldToPathCellY(goal.y);
 
   // 0 = unknown, 1 = walkable, 2 = blocked. The predicate is pure for the duration of one search.
   const walkable = new Uint8Array(KEY_STRIDE * KEY_ROWS);
@@ -62,9 +62,30 @@ export function findGridPath(
     return result;
   };
 
-  if (!isWalkableCell(startX, startY) || !isWalkableCell(goalX, goalY)) {
-    return [];
+  // A unit standing inside blocker padding (e.g. a worker that just finished a building next to it)
+  // steps out to the nearest walkable cell instead of being stuck forever.
+  let escapePoint: { x: number; y: number } | undefined;
+  if (!isWalkableCell(startX, startY)) {
+    const escape = findNearestWalkableCell(startX, startY, start, START_ESCAPE_RADIUS_CELLS, isWalkableCell);
+    if (!escape) {
+      return [];
+    }
+    startX = escape.x;
+    startY = escape.y;
+    escapePoint = { x: cellToWorld(startX), y: cellToWorld(startY) };
   }
+  // A click just next to an obstacle snaps to the closest reachable cell instead of being rejected.
+  let goalPoint = goal;
+  if (!isWalkableCell(goalX, goalY)) {
+    const snapped = findNearestWalkableCell(goalX, goalY, goal, GOAL_SNAP_RADIUS_CELLS, isWalkableCell);
+    if (!snapped) {
+      return [];
+    }
+    goalX = snapped.x;
+    goalY = snapped.y;
+    goalPoint = { x: cellToWorld(goalX), y: cellToWorld(goalY) };
+  }
+  const withEscape = (path: Array<{ x: number; y: number }>) => (escapePoint ? [escapePoint, ...path] : path);
 
   const nodes = new Map<number, PathNode>();
   const closed = new Set<number>();
@@ -87,7 +108,7 @@ export function findGridPath(
     closed.add(packKey(current.x, current.y));
 
     if (current.x === goalX && current.y === goalY) {
-      return reconstructPath(current).concat(goal);
+      return withEscape(reconstructPath(current).concat(goalPoint));
     }
 
     for (let direction = 0; direction < 8; direction += 1) {
@@ -125,6 +146,38 @@ export function findGridPath(
   }
 
   return [];
+}
+
+const START_ESCAPE_RADIUS_CELLS = 4;
+const GOAL_SNAP_RADIUS_CELLS = 2;
+
+/** Closest walkable cell (by world distance to `point`) within `radius` rings around a blocked cell. */
+function findNearestWalkableCell(
+  cellX: number,
+  cellY: number,
+  point: { x: number; y: number },
+  radius: number,
+  isWalkableCell: (cellX: number, cellY: number) => boolean,
+): { x: number; y: number } | undefined {
+  for (let ring = 1; ring <= radius; ring += 1) {
+    let best: { x: number; y: number } | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (let dy = -ring; dy <= ring; dy += 1) {
+      for (let dx = -ring; dx <= ring; dx += 1) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+        const x = cellX + dx;
+        const y = cellY + dy;
+        if (x < 0 || y < 0 || x > MAX_CELL_X || y > MAX_CELL_Y || !isWalkableCell(x, y)) continue;
+        const distance = Math.hypot(cellToWorld(x) - point.x, cellToWorld(y) - point.y);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = { x, y };
+        }
+      }
+    }
+    if (best) return best;
+  }
+  return undefined;
 }
 
 function reconstructPath(endNode: PathNode): Array<{ x: number; y: number }> {

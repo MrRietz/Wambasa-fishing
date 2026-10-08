@@ -363,7 +363,8 @@ async function loadTexturePaths(paths: string[], concurrency: number, tolerateMi
           continue;
         }
         try {
-          const texture = await Assets.load<Texture>(resolvePublicAssetPath(path));
+          // Required startup sprites get several retries; optional/deferred ones fail fast.
+          const texture = await loadTextureWithRetry(path, optionalSpritePaths.has(path) ? 1 : tolerateMissing ? 2 : 4);
           textures.set(path, texture);
         } catch (error) {
           if (!tolerateMissing && !optionalSpritePaths.has(path)) {
@@ -376,6 +377,25 @@ async function loadTexturePaths(paths: string[], concurrency: number, tolerateMi
       }
     }),
   );
+}
+
+/**
+ * Static hosts (GitHub Pages) can answer a burst of sprite requests with transient 5xx errors,
+ * e.g. while a new deploy rolls out. Retry a few times (new URL each time so a cached failure
+ * is not reused) before giving up and failing the boot.
+ */
+async function loadTextureWithRetry(path: string, attempts = 4): Promise<Texture> {
+  const url = resolvePublicAssetPath(path);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await Assets.load<Texture>(attempt === 0 ? url : `${url}${url.includes('?') ? '&' : '?'}retry=${attempt}`);
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+  }
+  throw lastError;
 }
 
 function uniquePaths(paths: string[]): string[] {

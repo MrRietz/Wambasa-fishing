@@ -1067,6 +1067,16 @@ button {
     pointer-events: none;
   }
 
+  /* The factory has more controls than two columns fit in the fixed bar (they were clipped): one row each. */
+  .rts-command-panel .rts-factory-commands {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .rts-command-panel .rts-factory-commands .rts-inline-adjuster {
+    grid-template-columns: minmax(0, 0.6fr) minmax(0, 1fr) minmax(0, 0.6fr) minmax(0, 1.2fr);
+    grid-template-areas: "less count more release";
+  }
+
   .rts-command-panel .rts-factory-commands button,
   .rts-command-panel .rts-dock-commands button,
   .rts-command-panel .rts-worker-commands button,

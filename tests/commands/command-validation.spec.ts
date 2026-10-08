@@ -699,6 +699,28 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'truck crush never hits friendly human units',
+    run: () => {
+      const truck = makeEntity({ id: 'truck-1', kind: 'truck' });
+      truck.collider = { kind: 'rect', width: 74, height: 48 };
+      truck.movement.state = 'moving';
+      const worker = makeEntity({ id: 'worker-1', kind: 'worker', faction: 'player', economy: { health: 85 } });
+      worker.x = truck.x + 5;
+
+      const output = updateTruckCrushSystem({
+        trucks: [truck],
+        entities: [truck, worker],
+        truckSpeeds: new Map([[truck.id, 95]]),
+        minimumCrushSpeed: 42,
+        applyDamage: testApplyDamage,
+      });
+
+      assert.equal(output.changed, false);
+      assert.deepEqual(output.events, []);
+      assert.equal(worker.economy?.health, 85);
+    },
+  },
+  {
     name: 'truck crush ignores stopped trucks and protected non-human targets',
     run: () => {
       const truck = makeEntity({ id: 'truck-1', kind: 'truck' });

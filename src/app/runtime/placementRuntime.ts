@@ -58,6 +58,22 @@ export function createPlacementRuntime(options: CreatePlacementRuntimeOptions): 
     );
   }
 
+  function findNearestValidPlacement(building: BuildingPlanKind, x: number, y: number): { x: number; y: number } {
+    for (let ring = 0; ring <= 8; ring += 1) {
+      const radius = ring * 60;
+      const steps = ring === 0 ? 1 : 8 + ring * 2;
+      for (let step = 0; step < steps; step += 1) {
+        const angle = (step / steps) * Math.PI * 2;
+        const candidateX = x + Math.cos(angle) * radius;
+        const candidateY = y + Math.sin(angle) * radius;
+        if (validate(building, candidateX, candidateY).valid) {
+          return { x: candidateX, y: candidateY };
+        }
+      }
+    }
+    return { x, y };
+  }
+
   function enterPlacementMode(building: BuildingPlanKind, layers: RenderLayers, camera: { x: number; y: number }): void {
     if (!options.hasSelectedWorker()) {
       options.reportCommandResult(
@@ -85,10 +101,12 @@ export function createPlacementRuntime(options: CreatePlacementRuntimeOptions): 
       return;
     }
 
+    // Open the preview on the nearest valid spot around the view centre instead of on top of a building.
+    const start = findNearestValidPlacement(building, camera.x + 480, camera.y + 360);
     options.setPlacementMode({
       building,
-      x: camera.x + 480,
-      y: camera.y + 360,
+      x: start.x,
+      y: start.y,
       valid: false,
       reason: 'Move cursor over buildable land',
     });
